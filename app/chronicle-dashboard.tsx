@@ -91,8 +91,10 @@ export default function ChronicleDashboard() {
   const [message, setMessage] = useState("");
 
   const loadGames = async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await fetch("/api/games");
+      const response = await fetch("/api/games", { signal: controller.signal });
       if (!response.ok) throw new Error("unavailable");
       const data = await response.json();
       setGames(data.games);
@@ -104,6 +106,7 @@ export default function ChronicleDashboard() {
     } catch {
       setMessage("Showing the imported ledger while the shared archive connects.");
     } finally {
+      window.clearTimeout(timeout);
       setLoading(false);
     }
   };
@@ -378,8 +381,11 @@ export default function ChronicleDashboard() {
       </aside>
 
       <div className={`content-shell${entered ? " page-ready" : ""}`}>
-        <div className={`page-turn${entered ? " open" : ""}`} aria-hidden="true">
-          <span className="brand-mark"><span>12</span></span>
+        <div className="page-turn open" aria-hidden="true">
+          <span className="opening-seal">
+            <span className="brand-mark"><span>12</span></span>
+            <small>Opening the ledger</small>
+          </span>
         </div>
         {message && (
           <div className="toast" role="status">
@@ -800,13 +806,9 @@ export default function ChronicleDashboard() {
         )}
 
         {loading && (
-          <>
-            <div className="loading-line" />
-            <div className="ledger-loader" role="status">
-              <span className="loader-ring">12</span>
-              <small>Opening the ledger</small>
-            </div>
-          </>
+          <div className="loading-line" role="status">
+            <span className="sr-only">Loading the shared ledger</span>
+          </div>
         )}
       </div>
     </main>

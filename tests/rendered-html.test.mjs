@@ -91,7 +91,11 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.match(css, /scrollbar-width:\s*none/);
   assert.match(css, /@keyframes open-ledger/);
   assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /loading-fade/);
   assert.match(dashboard, /loading="lazy"/);
+  assert.match(dashboard, /className="page-turn open"/);
+  assert.match(dashboard, /controller\.abort\(\), 5000/);
+  assert.doesNotMatch(dashboard, /ledger-loader/);
   assert.match(dashboard, /appearance\.personalResult/);
   assert.match(dashboard, /Good alignment/);
   assert.match(dashboard, /Most on one role/);
