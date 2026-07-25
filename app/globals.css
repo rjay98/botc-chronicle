@@ -648,9 +648,9 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
   .page-turn { left: 0; }
   .side-rail { width: auto; height: calc(60px + env(safe-area-inset-bottom)); inset: auto 0 0; z-index: 70; padding: 0 0 env(safe-area-inset-bottom); border: 0; border-top: 1px solid var(--line); }
   .side-rail .brand, .side-rail > .primary-action, .rail-caption, .ccc-mark { display: none; }
-  .side-rail nav { height: 100%; flex-direction: row; gap: 0; margin: 0; }
-  .side-rail nav a { flex: 1; min-height: 52px; justify-content: center; padding: 0 5px; font-size: 11px; border-left: 0; border-top: 2px solid transparent; text-align: center; }
-  .side-rail nav a.active { border-top-color: var(--focus); border-left-color: transparent; }
+  .side-rail nav { height: 100%; flex-direction: row; gap: 4px; margin: 0; padding: 6px; }
+  .side-rail nav a { flex: 1; min-height: 48px; justify-content: center; padding: 0 5px; font-size: 11px; border: 1px solid transparent; border-radius: 999px; text-align: center; }
+  .side-rail nav a.active { border-color: rgba(136,116,179,.42); background: var(--focus-soft); box-shadow: inset 0 0 0 1px rgba(255,255,255,.025); }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .metric-card:nth-child(3) { border-top: 1px solid var(--line); }
   .metric-card:nth-child(4) { border-top: 1px solid var(--line); }
@@ -711,9 +711,9 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
   .player-search input, .player-sort select { height: 46px; font-size: 16px; }
   .player-sort select { padding-top: 12px; font-size: 13px; }
   .player-sort > span { color: #b8aea5; font-size: 9px; }
-  .player-filter { min-width: 0; height: 46px; }
+  .player-filter { min-width: 0; height: 46px; padding: 3px; border-radius: 999px; }
   .player-filter { grid-column: 1 / -1; }
-  .player-filter button { min-height: 40px; padding: 0 5px; font-size: 11px; letter-spacing: .035em; }
+  .player-filter button { min-height: 38px; padding: 0 5px; border-radius: 999px; font-size: 11px; letter-spacing: .035em; }
   .player-board { width: 100%; min-width: 0; border-radius: 9px; }
   .player-board-head { display: none; }
   .player-row { contain-intrinsic-size: 64px; }
