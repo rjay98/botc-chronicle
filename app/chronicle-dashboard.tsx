@@ -37,6 +37,17 @@ type PlayerSort = "appearances" | "win-rate" | "wins" | "roles" | "top-role" | "
 type PlayerFilter = "all" | "active" | "unplayed";
 type PlayerScope = "all" | "good" | "evil" | CharacterType;
 type CharacterSort = "usage" | "name" | "win-rate";
+export type DashboardView = "overview" | "players" | "characters" | "games";
+
+const viewHref = (view: DashboardView) =>
+  view === "overview" ? "/" : `/?view=${view}`;
+
+const viewFromLocation = (): DashboardView => {
+  const requested = new URLSearchParams(window.location.search).get("view");
+  return requested === "players" || requested === "characters" || requested === "games"
+    ? requested
+    : "overview";
+};
 
 const FALLBACK_GAMES: Game[] = [
   { id: 1, playedAt: "2026-07-16", gameNumber: 4, script: "Sects & Violets", winner: "evil", storytellers: [], storyteller: "", durationMinutes: null, notes: ["The only good player left was executed in the final three."] },
@@ -67,14 +78,18 @@ const shortDate = (date: string) =>
 
 const displayScript = (script: string) => script || "Untitled game";
 
-export default function ChronicleDashboard() {
+export default function ChronicleDashboard({
+  initialView = "overview",
+}: {
+  initialView?: DashboardView;
+}) {
   const [games, setGames] = useState<Game[]>(FALLBACK_GAMES);
   const [appearances, setAppearances] = useState<Appearance[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [players, setPlayers] = useState<PlayerRecord[]>([]);
   const [characters, setCharacters] = useState<CharacterRecord[]>([]);
   const [scriptCatalog, setScriptCatalog] = useState<string[]>([]);
-  const [view, setView] = useState<"overview" | "players" | "characters" | "games">("overview");
+  const [view, setView] = useState<DashboardView>(initialView);
   const [modalOpen, setModalOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [scriptFilter, setScriptFilter] = useState("All scripts");
@@ -88,6 +103,7 @@ export default function ChronicleDashboard() {
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [entered, setEntered] = useState(false);
+  const [introVisible, setIntroVisible] = useState(true);
   const [message, setMessage] = useState("");
 
   const loadGames = async () => {
@@ -117,7 +133,17 @@ export default function ChronicleDashboard() {
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(frame);
+    const introTimeout = window.setTimeout(() => setIntroVisible(false), 1100);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(introTimeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncView = () => setView(viewFromLocation());
+    window.addEventListener("popstate", syncView);
+    return () => window.removeEventListener("popstate", syncView);
   }, []);
 
   useEffect(() => {
@@ -344,22 +370,43 @@ export default function ChronicleDashboard() {
     });
 
   const openSessionModal = () => setModalOpen(true);
+  const navigateToView = (nextView: DashboardView) => {
+    setView(nextView);
+    window.history.pushState({ view: nextView }, "", viewHref(nextView));
+  };
 
   return (
     <main className="app-shell">
       <aside className="side-rail">
-        <button className="brand" onClick={() => setView("overview")} aria-label="Midnight Ledger home">
+        <a
+          className="brand"
+          href={viewHref("overview")}
+          onClick={(event) => {
+            event.preventDefault();
+            navigateToView("overview");
+          }}
+          aria-label="Midnight Ledger home"
+        >
           <span className="brand-mark"><span>12</span></span>
           <span>
             <strong>Midnight Ledger</strong>
             <small>Group archive</small>
           </span>
-        </button>
+        </a>
         <nav aria-label="Primary navigation">
           {(["overview", "players", "characters", "games"] as const).map((item) => (
-            <button key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}>
+            <a
+              key={item}
+              href={viewHref(item)}
+              className={view === item ? "active" : ""}
+              aria-current={view === item ? "page" : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+                navigateToView(item);
+              }}
+            >
               {item}
-            </button>
+            </a>
           ))}
         </nav>
         <button className="primary-action" onClick={openSessionModal}>
@@ -381,12 +428,18 @@ export default function ChronicleDashboard() {
       </aside>
 
       <div className={`content-shell${entered ? " page-ready" : ""}`}>
-        <div className="page-turn open" aria-hidden="true">
-          <span className="opening-seal">
-            <span className="brand-mark"><span>12</span></span>
-            <small>Opening the ledger</small>
-          </span>
-        </div>
+        {introVisible && (
+          <div
+            className="page-turn open"
+            aria-hidden="true"
+            onAnimationEnd={() => setIntroVisible(false)}
+          >
+            <span className="opening-seal">
+              <span className="brand-mark"><span>12</span></span>
+              <small>Opening the ledger</small>
+            </span>
+          </div>
+        )}
         {message && (
           <div className="toast" role="status">
             {message}<button onClick={() => setMessage("")}>×</button>
@@ -472,7 +525,15 @@ export default function ChronicleDashboard() {
               <article className="panel script-performance">
                 <div className="panel-head">
                   <div><p className="eyebrow">By the numbers</p><h2>Script performance</h2></div>
-                  <button onClick={() => setView("games")}>View games →</button>
+                  <a
+                    href={viewHref("games")}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigateToView("games");
+                    }}
+                  >
+                    View games →
+                  </a>
                 </div>
                 <div className="table-head"><span>Script</span><span>Played</span><span>Good wins</span><span>Rate</span></div>
                 {stats.scriptRows.map((row, index) => (

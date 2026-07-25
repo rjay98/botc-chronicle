@@ -94,6 +94,12 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.match(css, /loading-fade/);
   assert.match(dashboard, /loading="lazy"/);
   assert.match(dashboard, /className="page-turn open"/);
+  assert.match(dashboard, /href=\{viewHref\(item\)\}/);
+  assert.match(dashboard, /aria-current=\{view === item \? "page"/);
+  assert.match(dashboard, /window\.history\.pushState/);
+  assert.match(dashboard, /setIntroVisible\(false\)/);
+  assert.match(css, /\.side-rail \{[^}]*z-index:\s*70/s);
+  assert.match(css, /touch-action:\s*manipulation/);
   assert.match(dashboard, /controller\.abort\(\), 5000/);
   assert.doesNotMatch(dashboard, /ledger-loader/);
   assert.match(dashboard, /appearance\.personalResult/);
