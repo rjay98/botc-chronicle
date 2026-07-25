@@ -57,10 +57,11 @@ test("imports the official four-category catalog and artwork", async () => {
 });
 
 test("keeps the live migration additive and preserves unknown values", async () => {
-  const [migration, resultMigration, scriptMigration] = await Promise.all([
+  const [migration, resultMigration, scriptMigration, nameCorrection] = await Promise.all([
     read("drizzle/0002_hard_bulldozer.sql"),
     read("drizzle/0003_grey_warbound.sql"),
     read("drizzle/0004_curved_longshot.sql"),
+    read("drizzle/0005_true_moon.sql"),
   ]);
 
   assert.match(migration, /CREATE TABLE `characters`/);
@@ -75,6 +76,10 @@ test("keeps the live migration additive and preserves unknown values", async () 
   assert.match(scriptMigration, /Sects & Violets/);
   assert.match(scriptMigration, /Troubled Brewing/);
   assert.doesNotMatch(scriptMigration, /DROP TABLE|DELETE FROM/i);
+  assert.match(nameCorrection, /Trouble Brewing/);
+  assert.match(nameCorrection, /Bad Moon Rising/);
+  assert.match(nameCorrection, /Blood Moon Rising/i);
+  assert.doesNotMatch(nameCorrection, /DROP TABLE/i);
 });
 
 test("contains the mobile interaction and rendering safeguards", async () => {
@@ -110,5 +115,37 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.match(dashboard, /appearance\.personalResult/);
   assert.match(dashboard, /Good alignment/);
   assert.match(dashboard, /Most on one role/);
+  assert.match(dashboard, /expandedGames/);
+  assert.match(dashboard, /Who was what/);
+  assert.match(dashboard, /View lineup/);
+  assert.match(dashboard, /Edit game/);
+  assert.match(dashboard, /editingAppearances/);
+  assert.match(dashboard, /appearancesByGame/);
+  assert.match(css, /\.game-lineup/);
+  assert.match(css, /\.game-seat/);
+  assert.match(css, /\.game-summary-bottom/);
   assert.match(modal, /export default function SessionModal/);
+  assert.match(modal, /editingGame \? "updateGame" : "addGame"/);
+  assert.match(modal, /Save changes/);
+  assert.match(api, /body\.action === "updateGame"/);
+  assert.match(api, /DELETE FROM appearances WHERE game_id/);
+});
+
+test("keeps cached documents compatible across releases", async () => {
+  const [worker, packageJson, preserveScript] = await Promise.all([
+    read("worker/index.ts"),
+    read("package.json"),
+    read("scripts/preserve-build-assets.mjs"),
+  ]);
+
+  assert.match(worker, /Clear-Site-Data/);
+  assert.match(worker, /DOCUMENT_CACHE_HEADERS/);
+  assert.match(worker, /CDN-Cache-Control/);
+  assert.match(worker, /LEGACY_ASSET_ALIASES/);
+  assert.match(worker, /ledger-current\.css/);
+  assert.match(worker, /X-Ledger-Asset-Recovery/);
+  assert.match(packageJson, /"postbuild":\s*"node scripts\/preserve-build-assets\.mjs"/);
+  assert.match(preserveScript, /dist.*client.*assets/s);
+  assert.match(preserveScript, /public.*assets/s);
+  assert.match(preserveScript, /ledger-dashboard\.js/);
 });

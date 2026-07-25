@@ -65,7 +65,7 @@ const FALLBACK_GAMES: Game[] = [
   { id: 5, playedAt: "2026-07-08", gameNumber: 3, script: "Opium Den", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["The Poppy Grower stayed alive the whole game.", "The demon was a Fang Gu — it jumped and died to the Witch."] },
   { id: 6, playedAt: "2026-07-08", gameNumber: 2, script: "Sects & Violets", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Artist, Flower Girl, and Dreamer info narrowed the demon down to one person on day 2."] },
   { id: 7, playedAt: "2026-07-08", gameNumber: 1, script: "Opium Den", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Both twin Chef infos were wrong because of the No Dashii."] },
-  { id: 8, playedAt: "2026-07-04", gameNumber: 6, script: "Troubled Brewing", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman."] },
+  { id: 8, playedAt: "2026-07-04", gameNumber: 6, script: "Trouble Brewing", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman."] },
   { id: 9, playedAt: "2026-07-01", gameNumber: 6, script: "A Leech of Distrust v2.1", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan told Abhi he was the Marionette, but Michael convinced Abhi he was being played."] },
   { id: 10, playedAt: "2026-07-01", gameNumber: 5, script: "A Leech of Distrust v2.1", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Michael cold-called that he was the leech host — based purely on vibes. He was right."] },
   { id: 11, playedAt: "2026-07-01", gameNumber: 4, script: "A Leech of Distrust v2.1", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan slayed Michael, the leech host, on day one."] },
@@ -99,6 +99,7 @@ export default function ChronicleDashboard({
   const [scriptCatalog, setScriptCatalog] = useState<string[]>([]);
   const [view, setView] = useState<DashboardView>(initialView);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingGameId, setEditingGameId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [scriptFilter, setScriptFilter] = useState("All scripts");
   const [characterFilter, setCharacterFilter] = useState<"all" | CharacterType>("all");
@@ -109,6 +110,7 @@ export default function ChronicleDashboard({
   const [playerFilter, setPlayerFilter] = useState<PlayerFilter>("all");
   const [playerScope, setPlayerScope] = useState<PlayerScope>("all");
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
+  const [expandedGames, setExpandedGames] = useState<Set<number>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [entered, setEntered] = useState(false);
   const [introVisible, setIntroVisible] = useState(true);
@@ -310,6 +312,17 @@ export default function ChronicleDashboard({
     [characters]
   );
 
+  const appearancesByGame = useMemo(() => {
+    const grouped = new Map<number, Appearance[]>();
+    appearances.forEach((appearance) => {
+      grouped.set(appearance.gameId, [
+        ...(grouped.get(appearance.gameId) ?? []),
+        appearance,
+      ]);
+    });
+    return grouped;
+  }, [appearances]);
+
   const visiblePlayers = useMemo(() => {
     const query = playerSearch.trim().toLowerCase();
     const gamesById = new Map(games.map((game) => [game.id, game]));
@@ -382,7 +395,10 @@ export default function ChronicleDashboard({
 
   const filteredGames = games.filter((game) => {
     const matchesScript = scriptFilter === "All scripts" || game.script === scriptFilter;
-    const haystack = `${game.script} ${game.notes.join(" ")} ${game.storytellers.join(" ")}`.toLowerCase();
+    const lineup = appearancesByGame.get(game.id) ?? [];
+    const haystack = `${game.script} ${game.notes.join(" ")} ${game.storytellers.join(" ")} ${lineup
+      .map((appearance) => `${appearance.player} ${appearance.character} ${appearance.characterType ?? ""}`)
+      .join(" ")}`.toLowerCase();
     return matchesScript && haystack.includes(search.toLowerCase());
   });
 
@@ -403,7 +419,26 @@ export default function ChronicleDashboard({
       return b.games - a.games || a.name.localeCompare(b.name);
     });
 
-  const openSessionModal = () => setModalOpen(true);
+  const openSessionModal = () => {
+    setEditingGameId(null);
+    setModalOpen(true);
+  };
+  const openGameEditor = (gameId: number) => {
+    setEditingGameId(gameId);
+    setModalOpen(true);
+  };
+  const closeSessionModal = () => {
+    setModalOpen(false);
+    setEditingGameId(null);
+  };
+  const toggleGame = (gameId: number) => {
+    setExpandedGames((current) => {
+      const next = new Set(current);
+      if (next.has(gameId)) next.delete(gameId);
+      else next.add(gameId);
+      return next;
+    });
+  };
   const navigateToView = (nextView: DashboardView) => {
     setView(nextView);
     window.history.pushState({ view: nextView }, "", viewHref(nextView));
@@ -594,6 +629,7 @@ export default function ChronicleDashboard({
                     onClick={() => {
                       setView("games");
                       setSearch(game.script);
+                      setExpandedGames((current) => new Set(current).add(game.id));
                     }}
                   >
                     <span className={`verdict-dot ${game.winner ?? "unknown"}`}>
@@ -848,41 +884,125 @@ export default function ChronicleDashboard({
                   {stats.scripts.map((script) => <option key={script}>{script}</option>)}
                 </select>
               </label>
-              <span>{filteredGames.length} result{filteredGames.length === 1 ? "" : "s"}</span>
+              <span className="filter-count">
+                <strong>{filteredGames.length}</strong>
+                result{filteredGames.length === 1 ? "" : "s"}
+              </span>
             </div>
             <div className="game-ledger">
-              {filteredGames.map((game) => (
-                <article className="game-entry" key={game.id}>
-                  <div className="date-block">
-                    <strong>{new Date(`${game.playedAt}T12:00:00`).getDate()}</strong>
-                    <span>{shortDate(game.playedAt).split(" ")[0]}</span>
-                    <small>{game.playedAt.slice(0, 4)}</small>
-                  </div>
-                  <div className="game-copy">
-                    <div>
-                      <span className={`verdict-pill ${game.winner ?? "unknown"}`}>
-                        {game.winner === "good"
-                          ? "✦ Good prevailed"
-                          : game.winner === "evil"
-                            ? "● Evil prevailed"
-                            : "Result unknown"}
-                      </span>
-                      <small>Game {game.gameNumber}</small>
+              {filteredGames.map((game) => {
+                const lineup = appearancesByGame.get(game.id) ?? [];
+                const isExpanded = expandedGames.has(game.id);
+                return (
+                  <article className={`game-entry${isExpanded ? " expanded" : ""}`} key={game.id}>
+                    <div className="date-block">
+                      <strong>{new Date(`${game.playedAt}T12:00:00`).getDate()}</strong>
+                      <span>{shortDate(game.playedAt).split(" ")[0]}</span>
+                      <small>{game.playedAt.slice(0, 4)}</small>
                     </div>
-                    <h2>{displayScript(game.script)}</h2>
-                    {game.notes.length > 0 && (
-                      <ul>{game.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
+                    <button
+                      className="game-summary"
+                      onClick={() => toggleGame(game.id)}
+                      aria-expanded={isExpanded}
+                      aria-controls={`game-detail-${game.id}`}
+                    >
+                      <span className="game-summary-top">
+                        <span className={`verdict-pill ${game.winner ?? "unknown"}`}>
+                          {game.winner === "good"
+                            ? "✦ Good prevailed"
+                            : game.winner === "evil"
+                              ? "● Evil prevailed"
+                              : "Result unknown"}
+                        </span>
+                        <small>Game {game.gameNumber}</small>
+                      </span>
+                      <span className="game-title">{displayScript(game.script)}</span>
+                      {game.notes[0] && <span className="game-note-preview">{game.notes[0]}</span>}
+                      <span className="game-summary-bottom">
+                        <span>
+                          {lineup.length
+                            ? `${lineup.length} seat${lineup.length === 1 ? "" : "s"} logged`
+                            : "Lineup not recorded"}
+                          {game.storytellers.length > 0 ? ` · Told by ${game.storytellers.join(" & ")}` : ""}
+                        </span>
+                        <strong>{isExpanded ? "Hide lineup" : "View lineup"} <i aria-hidden="true">⌄</i></strong>
+                      </span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="game-detail" id={`game-detail-${game.id}`}>
+                        <div className="game-detail-toolbar">
+                          <span>Game {game.gameNumber} details</span>
+                          <button
+                            type="button"
+                            className="edit-game-button"
+                            onClick={() => openGameEditor(game.id)}
+                          >
+                            Edit game
+                          </button>
+                        </div>
+                        {game.notes.length > 0 && (
+                          <div className="game-story">
+                            <span>Game notes</span>
+                            <ul>{game.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
+                          </div>
+                        )}
+                        <div className="game-lineup-section">
+                          <div className="game-detail-heading">
+                            <span>Who was what</span>
+                            <small>{lineup.length ? `${lineup.length} recorded` : "No lineup yet"}</small>
+                          </div>
+                          {lineup.length ? (
+                            <div className="game-lineup">
+                              {lineup.map((appearance) => {
+                                const character = characterByName.get(appearance.character.toLowerCase());
+                                return (
+                                  <div
+                                    className={`game-seat ${appearance.characterType ?? "unknown"}`}
+                                    key={appearance.id}
+                                  >
+                                    <span className="game-seat-icon">
+                                      {character?.imageUrl
+                                        ? <img src={character.imageUrl} alt="" loading="lazy" />
+                                        : (appearance.character || "?").slice(0, 2).toUpperCase()}
+                                    </span>
+                                    <span className="game-seat-copy">
+                                      <strong>{appearance.player || "Unknown player"}</strong>
+                                      <small>
+                                        {appearance.character || "Unknown role"}
+                                        <em> · {appearance.characterType ?? "type unknown"}</em>
+                                      </small>
+                                    </span>
+                                    {appearance.personalResult && (
+                                      <span className="game-seat-meta">
+                                        <small className={appearance.personalResult}>
+                                          Counts as {appearance.personalResult}
+                                        </small>
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="game-lineup-empty">
+                              This game predates lineup tracking. Add remembered roles the next time you revisit it.
+                            </p>
+                          )}
+                        </div>
+                        <div className="game-detail-footer">
+                          <p className="game-detail-meta">
+                            {game.storytellers.length > 0
+                              ? `Told by ${game.storytellers.join(" & ")}`
+                              : "Storyteller not recorded"}
+                            {game.durationMinutes ? ` · ${game.durationMinutes} min` : ""}
+                          </p>
+                        </div>
+                      </div>
                     )}
-                    {(game.storytellers.length > 0 || game.durationMinutes) && (
-                      <p className="game-meta">
-                        {game.storytellers.length > 0 && `Told by ${game.storytellers.join(" & ")}`}
-                        {game.storytellers.length > 0 && game.durationMinutes ? " · " : ""}
-                        {game.durationMinutes && `${game.durationMinutes} min`}
-                      </p>
-                    )}
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           </section>
         )}
@@ -894,7 +1014,11 @@ export default function ChronicleDashboard({
             players={players}
             characters={characters}
             scripts={scriptCatalog}
-            onClose={() => setModalOpen(false)}
+            editingGame={games.find((game) => game.id === editingGameId) ?? null}
+            editingAppearances={
+              editingGameId ? appearancesByGame.get(editingGameId) ?? [] : []
+            }
+            onClose={closeSessionModal}
             onDataChange={loadGames}
             onMessage={setMessage}
           />

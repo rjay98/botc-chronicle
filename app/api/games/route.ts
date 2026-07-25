@@ -32,7 +32,8 @@ const canonicalScript = (value?: string) => {
   const name = value?.trim().replace(/\s+/g, " ") ?? "";
   const key = name.toLowerCase();
   if (key === "sects and violets" || key === "sects & violets") return "Sects & Violets";
-  if (key === "trouble brewing" || key === "troubled brewing") return "Troubled Brewing";
+  if (key === "trouble brewing" || key === "troubled brewing") return "Trouble Brewing";
+  if (key === "blood moon rising" || key === "bad moon rising") return "Bad Moon Rising";
   return name;
 };
 
@@ -72,7 +73,7 @@ const SEED_GAMES = [
   ["2026-07-08", 1, "Opium Den", "good", ["Both the real and the fake Balloonist had info that kinda matched.", "Both twin Chef infos were wrong because of the No Dashii."]],
   ["2026-07-08", 2, "Sects & Violets", "good", ["Artist, Flower Girl, and Dreamer info narrowed the demon down to one person on day 2."]],
   ["2026-07-08", 3, "Opium Den", "good", ["The Poppy Grower stayed alive the whole game.", "The demon was a Fang Gu — it jumped and died to the Witch."]],
-  ["2026-07-04", 6, "Troubled Brewing", "good", ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman.", "Cam sunk a kill day one to convince town of his Monk bluff — town was further convinced when he hit the Soldier night 2 and seemed to have protected twice in a row."]],
+  ["2026-07-04", 6, "Trouble Brewing", "good", ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman.", "Cam sunk a kill day one to convince town of his Monk bluff — town was further convinced when he hit the Soldier night 2 and seemed to have protected twice in a row."]],
   ["2026-07-01", 1, "Watch Your Mouth V1", "evil", ["Claire told a story about getting into a car accident at Bay to Breakers / Pride — and Michael got mez-turned by asking how it was possible to mix up two events that were months apart.", "Lucy got a sober Empath “2” and never once considered it could be real."]],
   ["2026-07-01", 2, "Watch Your Mouth V1", "good", ["Anastasia was executed because everyone was convinced she was the innocent leech-host Pacifist — when in fact she was the starting Legion.", "Stephen was mez/legion-turned by convincing Lucy there was no Pixel clamshell foldable."]],
   ["2026-07-01", 3, "A Leech of Distrust v2.1", "good", ["Jenny told Lucy she was the Marionette, but Lucy assumed Abhi was the Devil's Advocate because he was triple-claiming Exorcist with Ryan and Jenny."]],
@@ -199,8 +200,28 @@ async function ensureDatabase() {
        WHERE lower(trim(script)) IN ('sects and violets', 'sects & violets')`
     ),
     db.prepare(
-      `UPDATE games SET script = 'Troubled Brewing'
+      `UPDATE games SET script = 'Trouble Brewing'
        WHERE lower(trim(script)) IN ('trouble brewing', 'troubled brewing')`
+    ),
+    db.prepare(
+      `UPDATE games SET script = 'Bad Moon Rising'
+       WHERE lower(trim(script)) IN ('bad moon rising', 'blood moon rising')`
+    ),
+    db.prepare(
+      `DELETE FROM scripts
+       WHERE lower(trim(name)) IN (
+         'trouble brewing', 'troubled brewing', 'bad moon rising', 'blood moon rising'
+       )`
+    ),
+    db.prepare(
+      `INSERT OR IGNORE INTO scripts (name, created_at)
+       SELECT 'Trouble Brewing', datetime('now')
+       WHERE EXISTS (SELECT 1 FROM games WHERE script = 'Trouble Brewing')`
+    ),
+    db.prepare(
+      `INSERT OR IGNORE INTO scripts (name, created_at)
+       SELECT 'Bad Moon Rising', datetime('now')
+       WHERE EXISTS (SELECT 1 FROM games WHERE script = 'Bad Moon Rising')`
     ),
     db.prepare(
       `INSERT OR IGNORE INTO scripts (name, created_at)
@@ -351,7 +372,7 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     const body = (await request.json()) as {
-        action?: "createSession" | "createPlayer" | "createCharacter" | "setPersonalResult" | "addGame";
+        action?: "createSession" | "createPlayer" | "createCharacter" | "setPersonalResult" | "addGame" | "updateGame";
         sessionId?: number;
         gameId?: number;
       playedAt?: string;
@@ -428,6 +449,115 @@ export async function POST(request: Request) {
         new Date().toISOString()
       ).first();
       return Response.json({ character }, { status: 201 });
+    }
+
+    if (body.action === "updateGame") {
+      if (!body.gameId) {
+        return Response.json({ error: "Choose a game to edit." }, { status: 400 });
+      }
+      const existingGame = await env.DB.prepare(
+        `SELECT id, session_id AS sessionId, played_at AS playedAt,
+           game_number AS gameNumber, winner
+         FROM games WHERE id = ?`
+      ).bind(body.gameId).first<{
+        id: number;
+        sessionId: number | null;
+        playedAt: string;
+        gameNumber: number;
+        winner: Winner;
+      }>();
+      if (!existingGame) {
+        return Response.json({ error: "That game no longer exists." }, { status: 404 });
+      }
+
+      const storytellers = Array.from(
+        new Set((body.storytellers ?? []).map((name) => name.trim()).filter(Boolean))
+      );
+      const winner = body.winner && ["good", "evil"].includes(body.winner) ? body.winner : null;
+      const script = canonicalScript(body.script);
+      const rows = (body.appearances ?? [])
+        .map((row) => ({
+          player: row.player?.trim() ?? "",
+          character: row.character?.trim() ?? "",
+          characterType: CHARACTER_TYPES.includes(row.characterType as CharacterType)
+            ? row.characterType as CharacterType
+            : null,
+          personalWin: row.personalResult === "win" ? 1 : row.personalResult === "loss" ? 0 : null,
+        }))
+        .filter((row) => row.player || row.character);
+
+      if (script) {
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO scripts (name, created_at) VALUES (?, ?)"
+        ).bind(script, new Date().toISOString()).run();
+      }
+      for (const row of rows) {
+        if (row.character && row.characterType) {
+          const existingCharacter = await env.DB.prepare(
+            "SELECT id FROM characters WHERE name = ? COLLATE NOCASE AND character_type = ?"
+          ).bind(row.character, row.characterType).first();
+          if (!existingCharacter) {
+            await env.DB.prepare(
+              `INSERT INTO characters
+                (source_id, name, character_type, edition, image_url, is_custom, created_at)
+               VALUES (NULL, ?, ?, 'custom', ?, 1, ?)`
+            ).bind(
+              row.character,
+              row.characterType,
+              genericCharacterImage(row.characterType),
+              new Date().toISOString()
+            ).run();
+          }
+        }
+      }
+
+      const statements = [
+        env.DB.prepare(
+          `UPDATE games SET
+             script = ?, winner = ?, winning_alignment = ?, storyteller = ?,
+             duration_minutes = ?, notes = ?
+           WHERE id = ?`
+        ).bind(
+          script,
+          winner ?? existingGame.winner,
+          winner,
+          storytellers.join(", "),
+          body.durationMinutes || null,
+          JSON.stringify((body.notes ?? []).filter(Boolean)),
+          existingGame.id
+        ),
+        env.DB.prepare("DELETE FROM game_storytellers WHERE game_id = ?").bind(existingGame.id),
+        env.DB.prepare("DELETE FROM appearances WHERE game_id = ?").bind(existingGame.id),
+        ...storytellers.map((storyteller) =>
+          env.DB.prepare(
+            "INSERT INTO game_storytellers (game_id, storyteller) VALUES (?, ?)"
+          ).bind(existingGame.id, storyteller)
+        ),
+        ...rows.map((row) => {
+          const legacyType = row.characterType ?? "townsfolk";
+          const alignment = legacyType === "minion" || legacyType === "demon" ? "evil" : "good";
+          return env.DB.prepare(
+            `INSERT INTO appearances
+              (game_id, player, character, character_type, role_type, alignment, personal_win)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            existingGame.id,
+            row.player,
+            row.character,
+            legacyType,
+            row.characterType,
+            alignment,
+            row.personalWin
+          );
+        }),
+      ];
+      await env.DB.batch(statements);
+
+      return Response.json({
+        ok: true,
+        gameId: existingGame.id,
+        gameNumber: existingGame.gameNumber,
+      });
     }
 
     if (!body.sessionId) {

@@ -28,6 +28,27 @@ type GameSummary = {
   sessionId?: number | null;
 };
 
+export type GameEditRecord = {
+  id: number;
+  sessionId?: number | null;
+  playedAt: string;
+  gameNumber: number;
+  script: string;
+  winner: "good" | "evil" | null;
+  storytellers: string[];
+  durationMinutes: number | null;
+  notes: string[];
+};
+
+export type AppearanceEditRecord = {
+  id: number;
+  gameId: number;
+  player: string;
+  character: string;
+  characterType?: CharacterType | null;
+  personalResult?: "win" | "loss" | null;
+};
+
 type LineupRow = {
   id: number;
   player: string;
@@ -43,6 +64,8 @@ type Props = {
   players: PlayerRecord[];
   characters: CharacterRecord[];
   scripts: string[];
+  editingGame?: GameEditRecord | null;
+  editingAppearances?: AppearanceEditRecord[];
   onClose: () => void;
   onDataChange: () => Promise<void>;
   onMessage: (message: string) => void;
@@ -57,6 +80,8 @@ const emptyLineupRow = (): LineupRow => ({
   personalResult: "",
 });
 
+const CHARACTER_TYPES: CharacterType[] = ["townsfolk", "outsider", "minion", "demon"];
+
 const formatDate = (date: string) =>
   new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
     new Date(`${date}T12:00:00`)
@@ -68,17 +93,60 @@ export default function SessionModal({
   players,
   characters,
   scripts,
+  editingGame = null,
+  editingAppearances = [],
   onClose,
   onDataChange,
   onMessage,
 }: Props) {
-  const [activeSession, setActiveSession] = useState<SessionRecord | null>(null);
+  const editSession = editingGame
+    ? sessions.find((session) => session.id === editingGame.sessionId) ?? {
+        id: editingGame.sessionId ?? 0,
+        playedAt: editingGame.playedAt,
+      }
+    : null;
+  const initialLineup = editingGame
+    ? editingAppearances.map((appearance) => {
+        const characterType = CHARACTER_TYPES.includes(appearance.characterType as CharacterType)
+          ? appearance.characterType as CharacterType
+          : "";
+        const knownCharacter = characters.some(
+          (character) =>
+            character.characterType === characterType
+            && character.name.toLowerCase() === appearance.character.toLowerCase()
+        );
+        return {
+          id: appearance.id,
+          player: appearance.player,
+          character: appearance.character,
+          characterType,
+          customCharacter: Boolean(appearance.character && !knownCharacter),
+          personalResult: appearance.personalResult ?? "",
+        } satisfies LineupRow;
+      })
+    : [];
+  const editingScriptIsKnown = Boolean(
+    editingGame?.script && scripts.some((script) => script === editingGame.script)
+  );
+  const [activeSession, setActiveSession] = useState<SessionRecord | null>(editSession);
   const [localPlayers, setLocalPlayers] = useState(players);
-  const [lineup, setLineup] = useState<LineupRow[]>([emptyLineupRow()]);
+  const [lineup, setLineup] = useState<LineupRow[]>(
+    initialLineup.length ? initialLineup : [emptyLineupRow()]
+  );
   const [newPlayerName, setNewPlayerName] = useState("");
-  const [scriptChoice, setScriptChoice] = useState("");
-  const [newScript, setNewScript] = useState("");
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [scriptChoice, setScriptChoice] = useState(
+    editingGame?.script
+      ? editingScriptIsKnown
+        ? editingGame.script
+        : "__custom__"
+      : ""
+  );
+  const [newScript, setNewScript] = useState(
+    editingGame?.script && !editingScriptIsKnown ? editingGame.script : ""
+  );
+  const [selectedDate, setSelectedDate] = useState(
+    () => editingGame?.playedAt ?? new Date().toISOString().slice(0, 10)
+  );
   const [saving, setSaving] = useState(false);
   const [draftKey, setDraftKey] = useState(0);
 
@@ -188,7 +256,8 @@ export default function SessionModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "addGame",
+          action: editingGame ? "updateGame" : "addGame",
+          gameId: editingGame?.id,
           sessionId: activeSession.id,
           script: scriptChoice === "__custom__" ? newScript.trim() : scriptChoice,
           winner: form.get("winner") || null,
@@ -211,6 +280,11 @@ export default function SessionModal({
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not save game");
       await onDataChange();
+      if (editingGame) {
+        onMessage(`Game ${editingGame.gameNumber} updated.`);
+        onClose();
+        return;
+      }
       if (finishAfterSave) {
         onMessage(`Game ${result.gameNumber} saved.`);
         onClose();
@@ -229,7 +303,10 @@ export default function SessionModal({
   };
 
   const requestClose = () => {
-    if (!activeSession || window.confirm("Discard this unsaved game draft?")) {
+    if (
+      !activeSession
+      || window.confirm(editingGame ? "Discard unsaved corrections?" : "Discard this unsaved game draft?")
+    ) {
       onClose();
     }
   };
@@ -248,16 +325,26 @@ export default function SessionModal({
       <div className="modal session-modal" role="dialog" aria-modal="true" aria-labelledby="session-title">
         <div className="modal-header">
           <div>
-            <p className="eyebrow">{activeSession ? "Session in progress · unsaved draft" : "Game night"}</p>
+            <p className="eyebrow">
+              {editingGame
+                ? "Archive correction"
+                : activeSession
+                  ? "Session in progress · unsaved draft"
+                  : "Game night"}
+            </p>
             <h2 id="session-title">
-              {activeSession
-                ? `Game ${games.filter((game) => game.sessionId === activeSession.id).length + 1}`
-                : "Start a session"}
+              {editingGame
+                ? `Edit game ${editingGame.gameNumber}`
+                : activeSession
+                  ? `Game ${games.filter((game) => game.sessionId === activeSession.id).length + 1}`
+                  : "Start a session"}
             </h2>
             <p className="modal-intro">
-              {activeSession
-                ? "Add whatever you remember. Only the session date is fixed."
-                : "Set the game-night date once, then add as many games as you play."}
+              {editingGame
+                ? "Correct anything that was logged incorrectly. The session date and game number stay fixed."
+                : activeSession
+                  ? "Add whatever you remember. Only the session date is fixed."
+                  : "Set the game-night date once, then add as many games as you play."}
             </p>
           </div>
           <button className="modal-close" onClick={requestClose} aria-label="Close">×</button>
@@ -347,24 +434,37 @@ export default function SessionModal({
                 </label>
                 <label>
                   Winner <small>optional</small>
-                  <select name="winner" defaultValue="">
+                  <select name="winner" defaultValue={editingGame?.winner ?? ""}>
                     <option value="">Not recorded</option>
                     <option value="good">Good</option>
                     <option value="evil">Evil</option>
                   </select>
                 </label>
                 <label>
-                  Duration <small>optional</small>
-                  <input name="durationMinutes" type="number" min="1" placeholder="Minutes" />
+                  Duration (min) <small>optional</small>
+                  <input
+                    name="durationMinutes"
+                    type="number"
+                    min="1"
+                    placeholder="Minutes"
+                    defaultValue={editingGame?.durationMinutes ?? ""}
+                  />
                 </label>
               </div>
 
               <fieldset className="storyteller-field">
-                <legend>Storytellers <small>optional · choose any number</small></legend>
+                <legend>Storytellers <small>optional · choose any number · lineup and notes below ↓</small></legend>
                 <div className="storyteller-options">
                   {localPlayers.map((player) => (
                     <label key={player.id}>
-                      <input type="checkbox" name="storytellers" value={player.name} />
+                      <input
+                        type="checkbox"
+                        name="storytellers"
+                        value={player.name}
+                        defaultChecked={editingGame?.storytellers.some(
+                          (storyteller) => storyteller.toLowerCase() === player.name.toLowerCase()
+                        )}
+                      />
                       <span>{player.name}</span>
                     </label>
                   ))}
@@ -545,28 +645,45 @@ export default function SessionModal({
                   name="notes"
                   rows={3}
                   placeholder="What will the group still be arguing about next week?"
+                  defaultValue={editingGame?.notes.join("\n") ?? ""}
                 />
               </label>
             </div>
-            <div className="modal-actions game-actions">
-              <button
-                className="save-button"
-                name="saveIntent"
-                value="continue"
-                disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
-              >
-                {saving ? "Saving…" : "Save & add another"}
-              </button>
-              <button
-                className="finish-button"
-                name="saveIntent"
-                value="finish"
-                disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
-              >
-                Save & finish
-              </button>
-              <button type="button" onClick={changeSession}>Change session</button>
-              <button type="button" onClick={requestClose}>Discard draft</button>
+            <div className={`modal-actions game-actions${editingGame ? " edit-actions" : ""}`}>
+              {editingGame ? (
+                <>
+                  <button type="button" onClick={requestClose}>Cancel</button>
+                  <button
+                    className="save-button"
+                    name="saveIntent"
+                    value="finish"
+                    disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
+                  >
+                    {saving ? "Saving…" : "Save changes"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="save-button"
+                    name="saveIntent"
+                    value="continue"
+                    disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
+                  >
+                    {saving ? "Saving…" : "Save & add another"}
+                  </button>
+                  <button
+                    className="finish-button"
+                    name="saveIntent"
+                    value="finish"
+                    disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
+                  >
+                    Save & finish
+                  </button>
+                  <button type="button" onClick={changeSession}>Change session</button>
+                  <button type="button" onClick={requestClose}>Discard draft</button>
+                </>
+              )}
             </div>
           </form>
         )}
