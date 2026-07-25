@@ -78,10 +78,11 @@ test("keeps the live migration additive and preserves unknown values", async () 
 });
 
 test("contains the mobile interaction and rendering safeguards", async () => {
-  const [css, dashboard, modal] = await Promise.all([
+  const [css, dashboard, modal, api] = await Promise.all([
     read("app/globals.css"),
     read("app/chronicle-dashboard.tsx"),
     read("app/session-modal.tsx"),
+    read("app/api/games/route.ts"),
   ]);
 
   assert.match(css, /content-visibility:\s*auto/);
@@ -100,7 +101,11 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.match(dashboard, /setIntroVisible\(false\)/);
   assert.match(css, /\.side-rail \{[^}]*z-index:\s*70/s);
   assert.match(css, /touch-action:\s*manipulation/);
-  assert.match(dashboard, /controller\.abort\(\), 5000/);
+  assert.match(dashboard, /attempt === 0 \? 8000 : 12000/);
+  assert.match(dashboard, /cache:\s*"no-store"/);
+  assert.match(dashboard, /fresh=\$\{Date\.now\(\)\}-\$\{attempt\}/);
+  assert.match(api, /Cache-Control.*no-store/);
+  assert.match(api, /CDN-Cache-Control.*no-store/);
   assert.doesNotMatch(dashboard, /ledger-loader/);
   assert.match(dashboard, /appearance\.personalResult/);
   assert.match(dashboard, /Good alignment/);

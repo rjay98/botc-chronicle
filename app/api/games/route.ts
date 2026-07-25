@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import officialRoles from "../../../data/official-roles.json";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type CharacterType = "townsfolk" | "outsider" | "minion" | "demon";
 type Winner = "good" | "evil";
 
@@ -19,6 +22,11 @@ type NewAppearance = {
 };
 
 const CHARACTER_TYPES: CharacterType[] = ["townsfolk", "outsider", "minion", "demon"];
+const LEDGER_RESPONSE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Surrogate-Control": "no-store",
+};
 
 const canonicalScript = (value?: string) => {
   const name = value?.trim().replace(/\s+/g, " ") ?? "";
@@ -312,26 +320,29 @@ export async function GET() {
       storytellersByGame.set(row.gameId, [...(storytellersByGame.get(row.gameId) ?? []), row.storyteller]);
     });
 
-    return Response.json({
-      games: gamesResult.results.map((game) => {
-        const storytellers = storytellersByGame.get(Number(game.id)) ?? [];
-        return {
-          ...game,
-          storytellers,
-          storyteller: storytellers.join(", "),
-          notes: JSON.parse(String(game.notes || "[]")),
-        };
-      }),
-      appearances: appearancesResult.results,
-      sessions: sessionsResult.results,
-      players: playersResult.results,
-      characters: charactersResult.results,
-      scripts: scriptsResult.results.map((script) => script.name),
-    });
+    return Response.json(
+      {
+        games: gamesResult.results.map((game) => {
+          const storytellers = storytellersByGame.get(Number(game.id)) ?? [];
+          return {
+            ...game,
+            storytellers,
+            storyteller: storytellers.join(", "),
+            notes: JSON.parse(String(game.notes || "[]")),
+          };
+        }),
+        appearances: appearancesResult.results,
+        sessions: sessionsResult.results,
+        players: playersResult.results,
+        characters: charactersResult.results,
+        scripts: scriptsResult.results.map((script) => script.name),
+      },
+      { headers: LEDGER_RESPONSE_HEADERS }
+    );
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "Unable to load the ledger." },
-      { status: 500 }
+      { status: 500, headers: LEDGER_RESPONSE_HEADERS }
     );
   }
 }

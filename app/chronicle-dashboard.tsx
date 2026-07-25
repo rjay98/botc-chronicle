@@ -38,6 +38,14 @@ type PlayerFilter = "all" | "active" | "unplayed";
 type PlayerScope = "all" | "good" | "evil" | CharacterType;
 type CharacterSort = "usage" | "name" | "win-rate";
 export type DashboardView = "overview" | "players" | "characters" | "games";
+type LedgerPayload = {
+  games: Game[];
+  appearances?: Appearance[];
+  sessions?: SessionRecord[];
+  players?: PlayerRecord[];
+  characters?: CharacterRecord[];
+  scripts?: string[];
+};
 
 const viewHref = (view: DashboardView) =>
   view === "overview" ? "/" : `/?view=${view}`;
@@ -106,25 +114,51 @@ export default function ChronicleDashboard({
   const [introVisible, setIntroVisible] = useState(true);
   const [message, setMessage] = useState("");
 
-  const loadGames = async () => {
+  const requestLedger = async (attempt: number) => {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      attempt === 0 ? 8000 : 12000
+    );
     try {
-      const response = await fetch("/api/games", { signal: controller.signal });
+      const response = await fetch(`/api/games?fresh=${Date.now()}-${attempt}`, {
+        signal: controller.signal,
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      });
       if (!response.ok) throw new Error("unavailable");
-      const data = await response.json();
-      setGames(data.games);
-      setAppearances(data.appearances);
-      setSessions(data.sessions ?? []);
-      setPlayers(data.players ?? []);
-      setCharacters(data.characters ?? []);
-      setScriptCatalog(data.scripts ?? []);
-    } catch {
-      setMessage("Showing the imported ledger while the shared archive connects.");
+      const data = await response.json() as LedgerPayload;
+      if (!Array.isArray(data.games)) throw new Error("invalid ledger");
+      return data;
     } finally {
       window.clearTimeout(timeout);
-      setLoading(false);
     }
+  };
+
+  const loadGames = async () => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const data = await requestLedger(attempt);
+        setGames(data.games);
+        setAppearances(data.appearances ?? []);
+        setSessions(data.sessions ?? []);
+        setPlayers(data.players ?? []);
+        setCharacters(data.characters ?? []);
+        setScriptCatalog(data.scripts ?? []);
+        setLoading(false);
+        return;
+      } catch {
+        if (attempt === 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 350));
+        }
+      }
+    }
+
+    setMessage("Showing the imported ledger while the shared archive connects.");
+    setLoading(false);
   };
 
   useEffect(() => {
