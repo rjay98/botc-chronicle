@@ -282,6 +282,9 @@ async function ensureDatabase() {
   await db.prepare(
     "UPDATE games SET session_id = (SELECT sessions.id FROM sessions WHERE sessions.played_at = games.played_at LIMIT 1) WHERE session_id IS NULL"
   ).run();
+  await db.prepare(
+    "DELETE FROM sessions WHERE NOT EXISTS (SELECT 1 FROM games WHERE games.session_id = sessions.id)"
+  ).run();
 
   const playerCount = await db.prepare("SELECT COUNT(*) AS count FROM players").first<{ count: number }>();
   if (Number(playerCount?.count ?? 0) === 0) {
@@ -324,6 +327,7 @@ export async function GET() {
           `SELECT id, played_at AS playedAt, created_at AS createdAt,
              (SELECT COUNT(*) FROM games WHERE games.session_id = sessions.id) AS gameCount
            FROM sessions
+           WHERE EXISTS (SELECT 1 FROM games WHERE games.session_id = sessions.id)
            ORDER BY played_at DESC, id DESC`
         ).all(),
         env.DB.prepare("SELECT id, name FROM players ORDER BY name COLLATE NOCASE").all(),
@@ -560,12 +564,20 @@ export async function POST(request: Request) {
       });
     }
 
-    if (!body.sessionId) {
-      return Response.json({ error: "Choose or start a session first." }, { status: 400 });
+    let session: { id: number; playedAt: string } | null = null;
+    if (body.sessionId) {
+      session = await env.DB.prepare(
+        "SELECT id, played_at AS playedAt FROM sessions WHERE id = ?"
+      ).bind(body.sessionId).first<{ id: number; playedAt: string }>() ?? null;
+    } else if (body.playedAt) {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO sessions (played_at, storyteller, created_at)
+         VALUES (?, '', ?)`
+      ).bind(body.playedAt, new Date().toISOString()).run();
+      session = await env.DB.prepare(
+        "SELECT id, played_at AS playedAt FROM sessions WHERE played_at = ? LIMIT 1"
+      ).bind(body.playedAt).first<{ id: number; playedAt: string }>() ?? null;
     }
-    const session = await env.DB.prepare(
-      "SELECT id, played_at AS playedAt FROM sessions WHERE id = ?"
-    ).bind(body.sessionId).first<{ id: number; playedAt: string }>();
     if (!session) return Response.json({ error: "That session no longer exists." }, { status: 404 });
 
     const next = await env.DB.prepare(

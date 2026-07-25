@@ -33,7 +33,7 @@ type Appearance = {
   personalResult?: "win" | "loss" | null;
 };
 
-type PlayerSort = "appearances" | "win-rate" | "wins" | "roles" | "top-role" | "name";
+type PlayerSort = "appearances" | "win-rate" | "wins" | "roles" | "recent-form" | "name";
 type PlayerFilter = "all" | "active" | "unplayed";
 type PlayerScope = "all" | "good" | "evil" | CharacterType;
 type CharacterSort = "usage" | "name" | "win-rate";
@@ -74,17 +74,65 @@ const FALLBACK_GAMES: Game[] = [
   { id: 14, playedAt: "2026-07-01", gameNumber: 1, script: "Watch Your Mouth V1", winner: "evil", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Michael got mez-turned by questioning Claire's story."] },
 ];
 
-const formatDate = (date: string) =>
-  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
-    new Date(`${date}T12:00:00`)
-  );
-
 const shortDate = (date: string) =>
   new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
     new Date(`${date}T12:00:00`)
   );
 
 const displayScript = (script: string) => script || "Untitled game";
+
+type PlayerBadge = {
+  id: string;
+  label: string;
+  icon: string;
+  description: string;
+  tone: "gold" | "good" | "evil" | "violet";
+};
+
+type PlayerForm = {
+  summary: string;
+  label: string;
+  icon: string;
+  wins: number;
+  losses: number;
+  score: number;
+};
+
+type PlayerInsight = {
+  id: string;
+  title: string;
+  player: string;
+  record: string;
+  detail: string;
+  icon: string;
+  tone: "good" | "evil" | "gold" | "violet";
+  score: number;
+};
+
+const CHARACTER_TYPE_LABELS: Record<CharacterType, string> = {
+  townsfolk: "Townsfolk",
+  outsider: "Outsider",
+  minion: "Minion",
+  demon: "Demon",
+};
+
+const appearanceResult = (
+  appearance: Appearance,
+  game?: Game
+): "win" | "loss" | null => {
+  if (appearance.personalResult) return appearance.personalResult;
+  if (!game?.winner || !appearance.alignment) return null;
+  return game.winner === appearance.alignment ? "win" : "loss";
+};
+
+const playerInitials = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .toUpperCase();
 
 export default function ChronicleDashboard({
   initialView = "overview",
@@ -207,7 +255,7 @@ export default function ChronicleDashboard({
       .sort((a, b) => b.games - a.games || (b.rate ?? -1) - (a.rate ?? -1));
 
     const gamesById = new Map(games.map((game) => [game.id, game]));
-    const playerMap = new Map<string, {
+    type PlayerAccumulator = {
       games: number;
       wins: number;
       decided: number;
@@ -215,30 +263,24 @@ export default function ChronicleDashboard({
       evil: number;
       roles: Map<string, { count: number; type: CharacterType | null }>;
       recent: Appearance[];
-    }>();
+    };
+    const emptyPlayerAccumulator = (): PlayerAccumulator => ({
+      games: 0,
+      wins: 0,
+      decided: 0,
+      good: 0,
+      evil: 0,
+      roles: new Map(),
+      recent: [],
+    });
+    const playerMap = new Map<string, PlayerAccumulator>();
     players.forEach((player) => {
-      playerMap.set(player.name, {
-        games: 0,
-        wins: 0,
-        decided: 0,
-        good: 0,
-        evil: 0,
-        roles: new Map(),
-        recent: [],
-      });
+      playerMap.set(player.name, emptyPlayerAccumulator());
     });
     appearances.forEach((appearance) => {
       if (!appearance.player) return;
       const game = gamesById.get(appearance.gameId);
-      const current = playerMap.get(appearance.player) ?? {
-        games: 0,
-        wins: 0,
-        decided: 0,
-        good: 0,
-        evil: 0,
-        roles: new Map(),
-        recent: [],
-      };
+      const current = playerMap.get(appearance.player) ?? emptyPlayerAccumulator();
       current.games += 1;
       current.good += appearance.alignment === "good" ? 1 : 0;
       current.evil += appearance.alignment === "evil" ? 1 : 0;
@@ -306,6 +348,293 @@ export default function ChronicleDashboard({
       characterMap,
     };
   }, [games, appearances, players]);
+
+  const overviewNights = useMemo(
+    () =>
+      stats.dates
+        .slice()
+        .reverse()
+        .map((date) => ({
+          date,
+          games: games
+            .filter((game) => game.playedAt === date)
+            .slice()
+            .sort((a, b) => a.gameNumber - b.gameNumber),
+        })),
+    [games, stats.dates]
+  );
+
+  const playerAnalytics = useMemo(() => {
+    const gamesById = new Map(games.map((game) => [game.id, game]));
+    const activeNightDates = new Set(stats.dates.slice(0, 3));
+    const categoryMinimums: Record<CharacterType, number> = {
+      townsfolk: 3,
+      outsider: 2,
+      minion: 2,
+      demon: 2,
+    };
+
+    const analytics = stats.players.map((player) => {
+      const lastTen = player.recent.slice(0, 10);
+      const latestGame = gamesById.get(lastTen[0]?.gameId ?? -1);
+      const isCurrent = Boolean(latestGame && activeNightDates.has(latestGame.playedAt));
+      const resultFor = (appearance: Appearance) =>
+        appearanceResult(appearance, gamesById.get(appearance.gameId));
+      const makeRecord = (source: Appearance[]) => {
+        let wins = 0;
+        let losses = 0;
+        source.forEach((appearance) => {
+          const result = resultFor(appearance);
+          wins += result === "win" ? 1 : 0;
+          losses += result === "loss" ? 1 : 0;
+        });
+        return { wins, losses, decided: wins + losses };
+      };
+
+      const categoryRecords = Object.fromEntries(
+        (Object.keys(CHARACTER_TYPE_LABELS) as CharacterType[]).map((type) => [
+          type,
+          makeRecord(lastTen.filter((appearance) => appearance.characterType === type)),
+        ])
+      ) as Record<CharacterType, { wins: number; losses: number; decided: number }>;
+
+      const alignmentRecords = {
+        good: makeRecord(lastTen.filter((appearance) => appearance.alignment === "good")),
+        evil: makeRecord(lastTen.filter((appearance) => appearance.alignment === "evil")),
+      };
+
+      let currentStreak = 0;
+      for (const appearance of lastTen) {
+        if (resultFor(appearance) !== "win") break;
+        currentStreak += 1;
+      }
+
+      const qualifiedCategory = (Object.keys(categoryRecords) as CharacterType[])
+        .map((type) => ({ type, ...categoryRecords[type] }))
+        .filter(({ type, wins, losses, decided }) =>
+          isCurrent
+          && decided >= categoryMinimums[type]
+          && wins >= 2
+          && wins > losses
+        )
+        .sort((a, b) =>
+          (b.wins / b.decided) - (a.wins / a.decided)
+          || b.wins - a.wins
+          || b.decided - a.decided
+        )[0];
+
+      const overallRecent = makeRecord(lastTen);
+      let form: PlayerForm;
+      if (qualifiedCategory) {
+        form = {
+          label: "Last 10 appearances",
+          summary: `${qualifiedCategory.wins}–${qualifiedCategory.losses} as ${CHARACTER_TYPE_LABELS[qualifiedCategory.type]}`,
+          icon: qualifiedCategory.type === "demon" || qualifiedCategory.type === "minion" ? "◆" : "✦",
+          wins: qualifiedCategory.wins,
+          losses: qualifiedCategory.losses,
+          score: (qualifiedCategory.wins / qualifiedCategory.decided) * 100 + qualifiedCategory.wins,
+        };
+      } else if (isCurrent && currentStreak >= 3) {
+        form = {
+          label: "Hot hand",
+          summary: `${currentStreak} straight wins`,
+          icon: "↗",
+          wins: currentStreak,
+          losses: 0,
+          score: 100 + currentStreak,
+        };
+      } else if (overallRecent.decided) {
+        form = {
+          label: "Last 10 appearances",
+          summary: `${overallRecent.wins}W–${overallRecent.losses}L overall`,
+          icon: "◈",
+          wins: overallRecent.wins,
+          losses: overallRecent.losses,
+          score: (overallRecent.wins / overallRecent.decided) * 100,
+        };
+      } else {
+        form = {
+          label: "Recent form",
+          summary: player.games ? "Results not recorded" : "No lineup data yet",
+          icon: "○",
+          wins: 0,
+          losses: 0,
+          score: -1,
+        };
+      }
+
+      const lifetimeCategoryRecords = Object.fromEntries(
+        (Object.keys(CHARACTER_TYPE_LABELS) as CharacterType[]).map((type) => [
+          type,
+          makeRecord(player.recent.filter((appearance) => appearance.characterType === type)),
+        ])
+      ) as Record<CharacterType, { wins: number; losses: number; decided: number }>;
+      const lifetimeGood = makeRecord(player.recent.filter((appearance) => appearance.alignment === "good"));
+      const lifetimeEvil = makeRecord(player.recent.filter((appearance) => appearance.alignment === "evil"));
+      const distinctCharacters = new Set(
+        player.recent.map((appearance) => appearance.character).filter(Boolean)
+      ).size;
+      const winningScripts = new Set(
+        player.recent
+          .filter((appearance) => resultFor(appearance) === "win")
+          .map((appearance) => gamesById.get(appearance.gameId)?.script)
+          .filter(Boolean)
+      ).size;
+      const overrideWins = player.recent.filter((appearance) => {
+        const game = gamesById.get(appearance.gameId);
+        return appearance.personalResult === "win"
+          && Boolean(game?.winner && appearance.alignment && game.winner !== appearance.alignment);
+      }).length;
+      const chronological = player.recent.slice().reverse();
+      let run = 0;
+      let longestStreak = 0;
+      chronological.forEach((appearance) => {
+        if (resultFor(appearance) === "win") {
+          run += 1;
+          longestStreak = Math.max(longestStreak, run);
+        } else {
+          run = 0;
+        }
+      });
+      const storyGames = games.filter((game) =>
+        game.storytellers.some((storyteller) => storyteller.toLowerCase() === player.name.toLowerCase())
+      );
+
+      const badgeCandidates: Array<PlayerBadge & { earned: boolean }> = [
+        { id: "demon-lord", label: "Demon Lord", icon: "♛", tone: "evil", description: "Won at least 2 of 3+ games as the Demon.", earned: lifetimeCategoryRecords.demon.decided >= 3 && lifetimeCategoryRecords.demon.wins >= 2 && lifetimeCategoryRecords.demon.wins > lifetimeCategoryRecords.demon.losses },
+        { id: "master-minion", label: "Master Minion", icon: "◆", tone: "evil", description: "Won at least 2 of 3+ games as a Minion.", earned: lifetimeCategoryRecords.minion.decided >= 3 && lifetimeCategoryRecords.minion.wins >= 2 && lifetimeCategoryRecords.minion.wins > lifetimeCategoryRecords.minion.losses },
+        { id: "townsfolk-stalwart", label: "Townsfolk Stalwart", icon: "✦", tone: "good", description: "Won at least 3 of 5+ games as Townsfolk.", earned: lifetimeCategoryRecords.townsfolk.decided >= 5 && lifetimeCategoryRecords.townsfolk.wins >= 3 },
+        { id: "outsider-savant", label: "Outsider Savant", icon: "◇", tone: "good", description: "Won at least 2 of 3+ games as an Outsider.", earned: lifetimeCategoryRecords.outsider.decided >= 3 && lifetimeCategoryRecords.outsider.wins >= 2 },
+        { id: "champion-good", label: "Champion of Good", icon: "☼", tone: "gold", description: "Won at least 4 of 6+ games aligned with Good.", earned: lifetimeGood.decided >= 6 && lifetimeGood.wins >= 4 },
+        { id: "agent-evil", label: "Agent of Evil", icon: "●", tone: "evil", description: "Won at least 3 of 5+ games aligned with Evil.", earned: lifetimeEvil.decided >= 5 && lifetimeEvil.wins >= 3 },
+        { id: "double-agent", label: "Double Agent", icon: "⇄", tone: "violet", description: "Won at least twice with both Good and Evil.", earned: lifetimeGood.wins >= 2 && lifetimeEvil.wins >= 2 },
+        { id: "four-faces", label: "Four Faces", icon: "◈", tone: "violet", description: "Played every character category.", earned: (Object.keys(lifetimeCategoryRecords) as CharacterType[]).every((type) => lifetimeCategoryRecords[type].decided > 0) },
+        { id: "grimoire-scholar", label: "Grimoire Scholar", icon: "✣", tone: "gold", description: "Played at least 8 distinct characters.", earned: distinctCharacters >= 8 },
+        { id: "scriptwalker", label: "Scriptwalker", icon: "⌁", tone: "gold", description: "Won games on at least 4 different scripts.", earned: winningScripts >= 4 },
+        { id: "class-traitor", label: "Class Traitor", icon: "↯", tone: "violet", description: "Won at least twice through a personal-result override.", earned: overrideWins >= 2 },
+        { id: "unbroken", label: "Unbroken", icon: "∞", tone: "gold", description: "Recorded a lifetime streak of at least 5 wins.", earned: longestStreak >= 5 },
+        { id: "iron-veteran", label: "Iron Veteran", icon: "20", tone: "gold", description: "Logged at least 20 appearances.", earned: player.games >= 20 },
+        { id: "elder-ravenswood", label: "Elder of Ravenswood", icon: "40", tone: "gold", description: "Logged at least 40 appearances.", earned: player.games >= 40 },
+        { id: "master-storyteller", label: "Master Storyteller", icon: "✒", tone: "violet", description: "Told at least 10 logged games.", earned: storyGames.length >= 10 },
+        { id: "co-conspirator", label: "Co-Conspirator", icon: "Ⅱ", tone: "violet", description: "Co-told at least 5 logged games.", earned: storyGames.filter((game) => game.storytellers.length > 1).length >= 5 },
+      ];
+      const badges = player.games >= 6
+        ? badgeCandidates
+          .filter(({ earned }) => earned)
+          .map(({ id, label, icon, description, tone }) => ({ id, label, icon, description, tone }))
+        : [];
+
+      return {
+        name: player.name,
+        form,
+        badges,
+        categoryRecords,
+        alignmentRecords,
+        currentStreak: isCurrent ? currentStreak : 0,
+        recentActive: isCurrent,
+        recentOverrideWins: lastTen.filter((appearance) => {
+          const game = gamesById.get(appearance.gameId);
+          return appearance.personalResult === "win"
+            && Boolean(game?.winner && appearance.alignment && game.winner !== appearance.alignment);
+        }).length,
+        recentCategoriesWon: (Object.keys(categoryRecords) as CharacterType[])
+          .filter((type) => categoryRecords[type].wins > 0).length,
+        badgeProgress: player.games < 6
+          ? `${player.games}/6 appearances · lifetime distinctions unlock at 6`
+          : "Keep building your record to unlock the next distinction",
+      };
+    });
+
+    const insights: PlayerInsight[] = [];
+    const addLeader = (
+      id: string,
+      title: string,
+      icon: string,
+      tone: PlayerInsight["tone"],
+      select: (entry: (typeof analytics)[number]) => { wins: number; losses: number; decided: number },
+      minimum: number
+    ) => {
+      const leader = analytics
+        .map((entry) => ({ entry, record: select(entry) }))
+        .filter(({ entry, record }) => entry.recentActive && record.decided >= minimum && record.wins > record.losses)
+        .sort((a, b) =>
+          (b.record.wins / b.record.decided) - (a.record.wins / a.record.decided)
+          || b.record.wins - a.record.wins
+          || b.record.decided - a.record.decided
+        )[0];
+      if (!leader) return;
+      insights.push({
+        id,
+        title,
+        player: leader.entry.name,
+        record: `${leader.record.wins}–${leader.record.losses}`,
+        detail: "last 10 appearances",
+        icon,
+        tone,
+        score: (leader.record.wins / leader.record.decided) * 100 + leader.record.wins,
+      });
+    };
+
+    addLeader("townsfolk-ace", "Townsfolk Ace", "✦", "good", (entry) => entry.categoryRecords.townsfolk, 3);
+    addLeader("minion-menace", "Minion Menace", "◆", "evil", (entry) => entry.categoryRecords.minion, 2);
+    addLeader("demon-ascendant", "Demon Ascendant", "♛", "evil", (entry) => entry.categoryRecords.demon, 2);
+    addLeader("outsider-oracle", "Outsider Oracle", "◇", "good", (entry) => entry.categoryRecords.outsider, 2);
+    addLeader("good-form", "Good Form", "☼", "gold", (entry) => entry.alignmentRecords.good, 4);
+    addLeader("evil-form", "Evil Form", "●", "evil", (entry) => entry.alignmentRecords.evil, 3);
+
+    const hotHand = analytics
+      .filter((entry) => entry.currentStreak >= 3)
+      .sort((a, b) => b.currentStreak - a.currentStreak)[0];
+    if (hotHand) {
+      insights.push({
+        id: "hot-hand",
+        title: "Hot Hand",
+        player: hotHand.name,
+        record: `${hotHand.currentStreak} straight`,
+        detail: "active win streak",
+        icon: "↗",
+        tone: "gold",
+        score: 110 + hotHand.currentStreak,
+      });
+    }
+    const againstScript = analytics
+      .filter((entry) => entry.recentActive && entry.recentOverrideWins > 0)
+      .sort((a, b) => b.recentOverrideWins - a.recentOverrideWins)[0];
+    if (againstScript) {
+      insights.push({
+        id: "against-script",
+        title: "Against the Script",
+        player: againstScript.name,
+        record: `${againstScript.recentOverrideWins} override win${againstScript.recentOverrideWins === 1 ? "" : "s"}`,
+        detail: "last 10 appearances",
+        icon: "↯",
+        tone: "violet",
+        score: 105 + againstScript.recentOverrideWins,
+      });
+    }
+    const widestRange = analytics
+      .filter((entry) => entry.recentActive && entry.recentCategoriesWon >= 3)
+      .sort((a, b) => b.recentCategoriesWon - a.recentCategoriesWon)[0];
+    if (widestRange) {
+      insights.push({
+        id: "widest-range",
+        title: "Widest Range",
+        player: widestRange.name,
+        record: `${widestRange.recentCategoriesWon} categories`,
+        detail: "won across the grimoire",
+        icon: "◈",
+        tone: "violet",
+        score: 100 + widestRange.recentCategoriesWon,
+      });
+    }
+
+    return {
+      byName: new Map(analytics.map((entry) => [entry.name, entry])),
+      insights: insights
+        .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+        .slice(0, 4),
+    };
+  }, [games, stats.dates, stats.players]);
 
   const characterByName = useMemo(
     () => new Map(characters.map((character) => [character.name.toLowerCase(), character])),
@@ -385,10 +714,15 @@ export default function ChronicleDashboard({
         }
         if (playerSort === "wins") return b.wins - a.wins || b.games - a.games || a.name.localeCompare(b.name);
         if (playerSort === "roles") return b.roles.length - a.roles.length || b.games - a.games || a.name.localeCompare(b.name);
-        if (playerSort === "top-role") return (b.roles[0]?.count ?? 0) - (a.roles[0]?.count ?? 0) || b.games - a.games || a.name.localeCompare(b.name);
+        if (playerSort === "recent-form") {
+          return (playerAnalytics.byName.get(b.name)?.form.score ?? -1)
+            - (playerAnalytics.byName.get(a.name)?.form.score ?? -1)
+            || b.games - a.games
+            || a.name.localeCompare(b.name);
+        }
         return b.games - a.games || b.wins - a.wins || a.name.localeCompare(b.name);
       });
-  }, [stats.players, games, playerFilter, playerScope, playerSearch, playerSort]);
+  }, [stats.players, games, playerAnalytics.byName, playerFilter, playerScope, playerSearch, playerSort]);
 
   const activePlayerCount = stats.players.filter((player) => player.games > 0).length;
   const lineupCount = appearances.filter((appearance) => appearance.player).length;
@@ -496,7 +830,7 @@ export default function ChronicleDashboard({
         </a>
       </aside>
 
-      <div className={`content-shell${entered ? " page-ready" : ""}`}>
+      <div className={`content-shell${entered && introVisible ? " initial-entry" : ""}`}>
         {introVisible && (
           <div
             className="page-turn open"
@@ -536,7 +870,7 @@ export default function ChronicleDashboard({
           </div>
           {(view === "overview" || view === "games") && (
             <button className="primary-action header-action" onClick={openSessionModal} aria-label="Start session">
-              <span>＋</span><span className="action-label">Game</span>
+              <span aria-hidden="true">+</span><span className="action-label">Game</span>
             </button>
           )}
         </section>
@@ -544,35 +878,34 @@ export default function ChronicleDashboard({
         {view === "overview" && (
           <>
             <section className="metric-grid" aria-label="Summary statistics">
-              <article className="metric-card hero-metric">
-                <span className="metric-kicker">Total games</span>
-                <strong>{String(games.length).padStart(2, "0")}</strong>
-                <p>across {stats.dates.length} game nights</p>
-                <div className="mini-timeline">
-                  {stats.dates.slice().reverse().map((date) => {
-                    const count = games.filter((game) => game.playedAt === date).length;
-                    return (
-                      <span
-                        key={date}
-                        style={{ height: `${20 + count * 8}px` }}
-                        title={`${shortDate(date)}: ${count} games`}
-                      >
-                        <em>{count}</em>
-                        <i>{shortDate(date)}</i>
-                      </span>
-                    );
-                  })}
+              <article className="metric-card ledger-summary-card">
+                <div className="ledger-summary-copy">
+                  <span className="metric-kicker">The chronicle</span>
+                  <div className="ledger-total">
+                    <strong>{String(games.length).padStart(2, "0")}</strong>
+                    <span>games · {stats.dates.length} nights</span>
+                  </div>
+                  <div className="ledger-balance" aria-label={`${stats.good} Good wins and ${stats.evil} Evil wins`}>
+                    <span className="good"><i />{stats.good} Good</span>
+                    <span className="evil"><i />{stats.evil} Evil</span>
+                    {stats.unknown > 0 && <span className="unknown"><i />{stats.unknown} unknown</span>}
+                  </div>
                 </div>
-              </article>
-              <article className="metric-card alignment-card">
-                <span className="metric-kicker">The balance</span>
-                <div className="alignment-row"><span className="sun">✦</span><b>{stats.good}</b><p>Good victories</p></div>
-                <div className="alignment-row evil"><span>●</span><b>{stats.evil}</b><p>Evil victories</p></div>
-                {stats.unknown > 0 && <div className="unknown-results">{stats.unknown} unrecorded</div>}
-                <div className="balance-bar"><span style={{ width: `${stats.goodRate}%` }} /></div>
-                <div className="balance-legend">
-                  <span>Good {stats.goodRate}%</span>
-                  <span>Evil {100 - stats.goodRate}%</span>
+                <div className="night-outcomes" aria-label="Results by game night">
+                  {overviewNights.map((night) => (
+                    <div className="night-column" key={night.date}>
+                      <div className="night-stack">
+                        {night.games.map((game) => (
+                          <span
+                            key={game.id}
+                            className={game.winner ?? "unknown"}
+                            title={`${shortDate(night.date)}, game ${game.gameNumber}: ${game.winner ?? "result unknown"}`}
+                          />
+                        ))}
+                      </div>
+                      <small>{shortDate(night.date)}</small>
+                    </div>
+                  ))}
                 </div>
               </article>
               <article className="metric-card">
@@ -657,6 +990,30 @@ export default function ChronicleDashboard({
                   <div><strong>{lineupCount}</strong><span>seats logged</span></div>
                 </div>
 
+                {playerAnalytics.insights.length > 0 && (
+                  <section className="player-spotlights" aria-labelledby="player-spotlights-title">
+                    <div className="spotlight-heading">
+                      <p className="eyebrow">Last 10 appearances</p>
+                      <h2 id="player-spotlights-title">Current form</h2>
+                    </div>
+                    <div className="spotlight-grid">
+                      {playerAnalytics.insights.map((insight) => (
+                        <article className={`spotlight-card ${insight.tone}`} key={insight.id}>
+                          <span className="spotlight-icon" aria-hidden="true">{insight.icon}</span>
+                          <span className="spotlight-copy">
+                            <small>{insight.title}</small>
+                            <strong>{insight.player}</strong>
+                          </span>
+                          <span className="spotlight-record">
+                            <strong>{insight.record}</strong>
+                            <small>{insight.detail}</small>
+                          </span>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 <div className="player-controls">
                   <label className="player-search">
                     <span aria-hidden="true">⌕</span>
@@ -676,8 +1033,8 @@ export default function ChronicleDashboard({
                       <option value="appearances">Most appearances</option>
                       <option value="win-rate">Highest win rate</option>
                       <option value="wins">Most wins</option>
+                      <option value="recent-form">Best recent form</option>
                       <option value="roles">Most roles played</option>
-                      <option value="top-role">Most on one role</option>
                       <option value="name">Name A–Z</option>
                     </select>
                   </label>
@@ -711,11 +1068,12 @@ export default function ChronicleDashboard({
 
                 <div className="player-board">
                   <div className="player-board-head" aria-hidden="true">
-                    <span>Rank / player</span><span>Recent roles</span><span>Record</span><span>Win rate</span>
+                    <span>Rank / player</span><span>Distinctions</span><span>Record</span><span>Win rate</span>
                   </div>
                   {visiblePlayers.map((player, index) => {
                     const isExpanded = expandedPlayer === player.name;
                     const rate = player.decided ? Math.round((player.wins / player.decided) * 100) : null;
+                    const playerView = playerAnalytics.byName.get(player.name);
                     return (
                       <article className={`player-row${isExpanded ? " expanded" : ""}`} key={player.name}>
                         <button
@@ -724,26 +1082,34 @@ export default function ChronicleDashboard({
                           aria-expanded={isExpanded}
                         >
                           <span className="player-rank">{String(index + 1).padStart(2, "0")}</span>
-                          <span className="player-avatar">{player.name.slice(0, 2).toUpperCase()}</span>
+                          <span className="player-avatar">{playerInitials(player.name)}</span>
                           <span className="player-identity">
                             <strong>{player.name}</strong>
                             <small>
                               {player.games} appearance{player.games === 1 ? "" : "s"}
-                              {player.roles[0] ? ` · top ${player.roles[0].role}${player.roles[0].count > 1 ? ` ×${player.roles[0].count}` : ""}` : " · no roles"}
+                              {playerScope === "all" && playerView
+                                ? ` · ${playerView.form.summary}`
+                                : playerScope !== "all" && player.decided
+                                  ? ` · ${player.wins}W–${player.decided - player.wins}L in scope`
+                                  : ""}
                             </small>
                           </span>
                           <span className="player-roles">
-                            {player.roles.slice(0, 3).map(({ role, type }) => {
-                              const character = characterByName.get(role.toLowerCase());
-                              return (
-                                <span className={`player-role-icon ${type ?? ""}`} key={role} title={role}>
-                                  {character?.imageUrl
-                                    ? <img src={character.imageUrl} alt="" loading="lazy" />
-                                    : role.slice(0, 2).toUpperCase()}
-                                </span>
-                              );
-                            })}
-                            {player.roles.length === 0 && <small>No roles yet</small>}
+                            {playerView?.badges.slice(0, 3).map((badge) => (
+                              <span
+                                className={`badge-seal ${badge.tone}`}
+                                key={badge.id}
+                                title={`${badge.label}: ${badge.description}`}
+                                aria-label={badge.label}
+                              >
+                                {badge.icon}
+                              </span>
+                            ))}
+                            {playerView?.badges.length === 0 && (
+                              <small className="distinction-progress">
+                                {player.games < 6 ? `${player.games}/6 to unlock` : "Building a record"}
+                              </small>
+                            )}
                           </span>
                           <span className="player-record"><strong>{player.wins}W</strong><small>{player.decided - player.wins}L</small></span>
                           <span className="player-rate">
@@ -755,6 +1121,36 @@ export default function ChronicleDashboard({
 
                         {isExpanded && (
                           <div className="player-detail">
+                            <div className="player-detail-top">
+                              <section className="player-form-card">
+                                <span className="detail-label">{playerView?.form.label ?? "Recent form"}</span>
+                                <div>
+                                  <span className="form-mark" aria-hidden="true">{playerView?.form.icon ?? "○"}</span>
+                                  <span>
+                                    <strong>{playerView?.form.summary ?? "No result data yet"}</strong>
+                                    <small>Rolling form uses this player’s latest 10 appearances and expires after three inactive game nights.</small>
+                                  </span>
+                                </div>
+                              </section>
+                              <section className="player-badge-cabinet">
+                                <span className="detail-label">Lifetime distinctions</span>
+                                {playerView?.badges.length ? (
+                                  <div>
+                                    {playerView.badges.map((badge) => (
+                                      <span className={`player-badge ${badge.tone}`} key={badge.id}>
+                                        <i aria-hidden="true">{badge.icon}</i>
+                                        <span><strong>{badge.label}</strong><small>{badge.description}</small></span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="badge-empty">
+                                    <span aria-hidden="true">◇</span>
+                                    {playerView?.badgeProgress ?? "Lifetime distinctions unlock after 6 appearances"}
+                                  </p>
+                                )}
+                              </section>
+                            </div>
                             <div className="player-detail-stat">
                               <span>Alignment history</span>
                               <strong><i className="good-dot" />{player.good} good</strong>

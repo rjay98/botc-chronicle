@@ -26,6 +26,7 @@ export type CharacterRecord = {
 
 type GameSummary = {
   sessionId?: number | null;
+  storytellers?: string[];
 };
 
 export type GameEditRecord = {
@@ -134,6 +135,9 @@ export default function SessionModal({
     initialLineup.length ? initialLineup : [emptyLineupRow()]
   );
   const [newPlayerName, setNewPlayerName] = useState("");
+  const [selectedStorytellers, setSelectedStorytellers] = useState<string[]>(
+    editingGame?.storytellers ?? []
+  );
   const [scriptChoice, setScriptChoice] = useState(
     editingGame?.script
       ? editingScriptIsKnown
@@ -171,37 +175,35 @@ export default function SessionModal({
     return grouped;
   }, [characters]);
 
+  const storytellerOptions = useMemo(() => {
+    const counts = new Map(localPlayers.map((player) => [player.name.toLowerCase(), 0]));
+    games.forEach((game) => {
+      (game.storytellers ?? []).forEach((storyteller) => {
+        const key = storyteller.toLowerCase();
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      });
+    });
+    return localPlayers
+      .map((player) => ({
+        ...player,
+        gamesTold: counts.get(player.name.toLowerCase()) ?? 0,
+      }))
+      .sort((a, b) => b.gamesTold - a.gamesTold || a.name.localeCompare(b.name));
+  }, [games, localPlayers]);
+
   const matchingSession = sessions.find((session) => session.playedAt === selectedDate) ?? null;
 
-  const startSession = async (event: FormEvent<HTMLFormElement>) => {
+  const startSession = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (matchingSession) {
       setActiveSession(matchingSession);
       setLineup([emptyLineupRow()]);
       return;
     }
-    setSaving(true);
     onMessage("");
     const form = new FormData(event.currentTarget);
-    try {
-      const response = await fetch("/api/games", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "createSession",
-          playedAt: form.get("playedAt"),
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Could not start session");
-      await onDataChange();
-      setActiveSession(result.session);
-      setLineup([emptyLineupRow()]);
-    } catch (error) {
-      onMessage(error instanceof Error ? error.message : "Could not start this session.");
-    } finally {
-      setSaving(false);
-    }
+    setActiveSession({ id: 0, playedAt: String(form.get("playedAt") ?? selectedDate) });
+    setLineup([emptyLineupRow()]);
   };
 
   const addPlayer = async () => {
@@ -259,9 +261,10 @@ export default function SessionModal({
           action: editingGame ? "updateGame" : "addGame",
           gameId: editingGame?.id,
           sessionId: activeSession.id,
+          playedAt: activeSession.playedAt,
           script: scriptChoice === "__custom__" ? newScript.trim() : scriptChoice,
           winner: form.get("winner") || null,
-          storytellers: form.getAll("storytellers"),
+          storytellers: selectedStorytellers,
           durationMinutes: Number(form.get("durationMinutes")) || null,
           notes: String(form.get("notes") ?? "")
             .split("\n")
@@ -322,7 +325,12 @@ export default function SessionModal({
       className="modal-backdrop"
       onMouseDown={(event) => event.target === event.currentTarget && requestClose()}
     >
-      <div className="modal session-modal" role="dialog" aria-modal="true" aria-labelledby="session-title">
+      <div
+        className={`modal session-modal${activeSession ? "" : " session-launcher"}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-title"
+      >
         <div className="modal-header">
           <div>
             <p className="eyebrow">
@@ -452,24 +460,51 @@ export default function SessionModal({
                 </label>
               </div>
 
-              <fieldset className="storyteller-field">
-                <legend>Storytellers <small>optional · choose any number · lineup and notes below ↓</small></legend>
-                <div className="storyteller-options">
-                  {localPlayers.map((player) => (
-                    <label key={player.id}>
-                      <input
-                        type="checkbox"
-                        name="storytellers"
-                        value={player.name}
-                        defaultChecked={editingGame?.storytellers.some(
-                          (storyteller) => storyteller.toLowerCase() === player.name.toLowerCase()
-                        )}
-                      />
-                      <span>{player.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <div className="storyteller-picker">
+                <label>
+                  <span>Storytellers <small>optional · ordered by games told</small></span>
+                  <select
+                    aria-label="Add storyteller"
+                    value=""
+                    onChange={(event) => {
+                      const storyteller = event.target.value;
+                      if (!storyteller) return;
+                      setSelectedStorytellers((current) =>
+                        current.includes(storyteller) ? current : [...current, storyteller]
+                      );
+                    }}
+                  >
+                    <option value="">Add storyteller…</option>
+                    {storytellerOptions
+                      .filter((player) => !selectedStorytellers.includes(player.name))
+                      .map((player) => (
+                        <option key={player.id} value={player.name}>
+                          {player.name}{player.gamesTold ? ` · ${player.gamesTold} told` : ""}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {selectedStorytellers.length > 0 && (
+                  <div className="selected-storytellers" aria-label="Selected storytellers">
+                    {selectedStorytellers.map((storyteller) => (
+                      <span key={storyteller}>
+                        {storyteller}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedStorytellers((current) =>
+                              current.filter((name) => name !== storyteller)
+                            )
+                          }
+                          aria-label={`Remove ${storyteller} as storyteller`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="lineup-section">
                 <div className="section-label">
