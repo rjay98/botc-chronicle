@@ -34,6 +34,7 @@ type LineupRow = {
   character: string;
   characterType: CharacterType | "";
   customCharacter: boolean;
+  personalResult: "" | "win" | "loss";
 };
 
 type Props = {
@@ -41,6 +42,7 @@ type Props = {
   games: GameSummary[];
   players: PlayerRecord[];
   characters: CharacterRecord[];
+  scripts: string[];
   onClose: () => void;
   onDataChange: () => Promise<void>;
   onMessage: (message: string) => void;
@@ -52,6 +54,7 @@ const emptyLineupRow = (): LineupRow => ({
   character: "",
   characterType: "",
   customCharacter: false,
+  personalResult: "",
 });
 
 const formatDate = (date: string) =>
@@ -64,6 +67,7 @@ export default function SessionModal({
   games,
   players,
   characters,
+  scripts,
   onClose,
   onDataChange,
   onMessage,
@@ -72,6 +76,9 @@ export default function SessionModal({
   const [localPlayers, setLocalPlayers] = useState(players);
   const [lineup, setLineup] = useState<LineupRow[]>([emptyLineupRow()]);
   const [newPlayerName, setNewPlayerName] = useState("");
+  const [scriptChoice, setScriptChoice] = useState("");
+  const [newScript, setNewScript] = useState("");
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [draftKey, setDraftKey] = useState(0);
 
@@ -96,8 +103,15 @@ export default function SessionModal({
     return grouped;
   }, [characters]);
 
+  const matchingSession = sessions.find((session) => session.playedAt === selectedDate) ?? null;
+
   const startSession = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (matchingSession) {
+      setActiveSession(matchingSession);
+      setLineup([emptyLineupRow()]);
+      return;
+    }
     setSaving(true);
     onMessage("");
     const form = new FormData(event.currentTarget);
@@ -164,6 +178,8 @@ export default function SessionModal({
   const submitSessionGame = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeSession) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const finishAfterSave = submitter?.value === "finish";
     setSaving(true);
     onMessage("");
     const form = new FormData(event.currentTarget);
@@ -174,7 +190,7 @@ export default function SessionModal({
         body: JSON.stringify({
           action: "addGame",
           sessionId: activeSession.id,
-          script: form.get("script"),
+          script: scriptChoice === "__custom__" ? newScript.trim() : scriptChoice,
           winner: form.get("winner") || null,
           storytellers: form.getAll("storytellers"),
           durationMinutes: Number(form.get("durationMinutes")) || null,
@@ -184,17 +200,25 @@ export default function SessionModal({
             .filter(Boolean),
           appearances: lineup
             .filter((row) => row.player || row.character)
-            .map(({ player, character, characterType }) => ({
+            .map(({ player, character, characterType, personalResult }) => ({
               player,
               character,
               characterType,
+              personalResult,
             })),
         }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not save game");
       await onDataChange();
+      if (finishAfterSave) {
+        onMessage(`Game ${result.gameNumber} saved.`);
+        onClose();
+        return;
+      }
       setLineup([emptyLineupRow()]);
+      setScriptChoice("");
+      setNewScript("");
       setDraftKey((current) => current + 1);
       onMessage(`Game ${result.gameNumber} saved. Ready for the next one.`);
     } catch (error) {
@@ -204,15 +228,27 @@ export default function SessionModal({
     }
   };
 
+  const requestClose = () => {
+    if (!activeSession || window.confirm("Discard this unsaved game draft?")) {
+      onClose();
+    }
+  };
+
+  const changeSession = () => {
+    if (window.confirm("Discard this draft and choose another session?")) {
+      setActiveSession(null);
+    }
+  };
+
   return (
     <div
       className="modal-backdrop"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+      onMouseDown={(event) => event.target === event.currentTarget && requestClose()}
     >
       <div className="modal session-modal" role="dialog" aria-modal="true" aria-labelledby="session-title">
         <div className="modal-header">
           <div>
-            <p className="eyebrow">{activeSession ? "Session in progress" : "Game night"}</p>
+            <p className="eyebrow">{activeSession ? "Session in progress · unsaved draft" : "Game night"}</p>
             <h2 id="session-title">
               {activeSession
                 ? `Game ${games.filter((game) => game.sessionId === activeSession.id).length + 1}`
@@ -224,7 +260,7 @@ export default function SessionModal({
                 : "Set the game-night date once, then add as many games as you play."}
             </p>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+          <button className="modal-close" onClick={requestClose} aria-label="Close">×</button>
         </div>
 
         {!activeSession ? (
@@ -236,7 +272,8 @@ export default function SessionModal({
                   <input
                     name="playedAt"
                     type="date"
-                    defaultValue={new Date().toISOString().slice(0, 10)}
+                    value={selectedDate}
+                    onChange={(event) => setSelectedDate(event.target.value)}
                     required
                   />
                 </label>
@@ -244,27 +281,28 @@ export default function SessionModal({
               {sessions.length > 0 && (
                 <div className="recent-sessions">
                   <div className="section-label"><span>Or continue a session</span><i /></div>
-                  {sessions.slice(0, 6).map((session) => (
-                    <button type="button" key={session.id} onClick={() => setActiveSession(session)}>
-                      <span>
-                        <strong>{formatDate(session.playedAt)}</strong>
-                        <small>A shared game-night record</small>
-                      </span>
-                      <em>
-                        {Number(
-                          session.gameCount ??
-                          games.filter((game) => game.sessionId === session.id).length
-                        )} games →
-                      </em>
-                    </button>
-                  ))}
+                  {sessions.slice(0, 6).map((session) => {
+                    const gameCount = Number(
+                      session.gameCount ??
+                      games.filter((game) => game.sessionId === session.id).length
+                    );
+                    return (
+                      <button type="button" key={session.id} onClick={() => setActiveSession(session)}>
+                        <span>
+                          <strong>{formatDate(session.playedAt)}</strong>
+                          <small>A shared game-night record</small>
+                        </span>
+                        <em>{gameCount} game{gameCount === 1 ? "" : "s"} →</em>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
-            <div className="modal-actions">
+            <div className="modal-actions start-actions">
               <button type="button" onClick={onClose}>Cancel</button>
               <button className="save-button" disabled={saving}>
-                {saving ? "Starting…" : "Start session"}
+                {saving ? "Starting…" : matchingSession ? "Continue session" : "Start session"}
               </button>
             </div>
           </form>
@@ -278,9 +316,34 @@ export default function SessionModal({
               </div>
 
               <div className="game-fields">
-                <label>
+                <label className="script-field">
                   Script <small>optional</small>
-                  <input name="script" placeholder="e.g. Sects & Violets" />
+                  <select
+                    aria-label="Script optional"
+                    value={scriptChoice}
+                    onChange={(event) => {
+                      setScriptChoice(event.target.value);
+                      if (event.target.value !== "__custom__") setNewScript("");
+                    }}
+                  >
+                    <option value="">Not recorded</option>
+                    {scripts.map((script) => <option key={script} value={script}>{script}</option>)}
+                    <option value="__custom__">＋ Create new script…</option>
+                  </select>
+                  {scriptChoice === "__custom__" && (
+                    <span className="custom-script-field">
+                      <span className="custom-script-label">New script name <small>required</small></span>
+                      <input
+                        name="newScript"
+                        aria-label="New script name"
+                        placeholder="e.g. Midnight in Ravenswood"
+                        value={newScript}
+                        onChange={(event) => setNewScript(event.target.value)}
+                        autoFocus
+                        required
+                      />
+                    </span>
+                  )}
                 </label>
                 <label>
                   Winner <small>optional</small>
@@ -313,7 +376,7 @@ export default function SessionModal({
                   <span>Player lineup · everything optional</span><i />
                 </div>
                 <div className="lineup-head">
-                  <span>Player</span><span>Category</span><span>Character</span><span />
+                  <span>Player</span><span>Category</span><span>Character</span><span>Personal result</span><span />
                 </div>
                 <div className="lineup-rows">
                   {lineup.map((row, index) => {
@@ -353,7 +416,7 @@ export default function SessionModal({
                               })
                             }
                           >
-                            <option value="">Category unknown</option>
+                            <option value="">Category</option>
                             <option value="townsfolk">Townsfolk</option>
                             <option value="outsider">Outsider</option>
                             <option value="minion">Minion</option>
@@ -406,7 +469,7 @@ export default function SessionModal({
                                 }}
                               >
                                 <option value="">
-                                  {row.characterType ? "Character unknown" : "Choose category first"}
+                                  {row.characterType ? "Character" : "Choose category first"}
                                 </option>
                                 {availableCharacters.map((character) => (
                                   <option key={character.id} value={character.name}>
@@ -417,6 +480,22 @@ export default function SessionModal({
                               </select>
                             </div>
                           )}
+                        </label>
+                        <label>
+                          <span className="sr-only">Personal result for player {index + 1}</span>
+                          <select
+                            aria-label={`Personal result for player ${index + 1}`}
+                            value={row.personalResult}
+                            onChange={(event) =>
+                              updateLineupRow(row.id, {
+                                personalResult: event.target.value as "" | "win" | "loss",
+                              })
+                            }
+                          >
+                            <option value="">Result automatic</option>
+                            <option value="win">Counts as win</option>
+                            <option value="loss">Counts as loss</option>
+                          </select>
                         </label>
                         <button
                           type="button"
@@ -429,7 +508,8 @@ export default function SessionModal({
                           disabled={lineup.length === 1}
                           aria-label={`Remove player row ${index + 1}`}
                         >
-                          ×
+                          <span aria-hidden="true">×</span>
+                          <span className="remove-label">Remove row</span>
                         </button>
                       </div>
                     );
@@ -468,12 +548,25 @@ export default function SessionModal({
                 />
               </label>
             </div>
-            <div className="modal-actions">
-              <button type="button" onClick={() => setActiveSession(null)}>Change session</button>
-              <button type="button" onClick={onClose}>Finish later</button>
-              <button className="save-button" disabled={saving}>
-                {saving ? "Saving…" : "Save game & add another"}
+            <div className="modal-actions game-actions">
+              <button
+                className="save-button"
+                name="saveIntent"
+                value="continue"
+                disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
+              >
+                {saving ? "Saving…" : "Save & add another"}
               </button>
+              <button
+                className="finish-button"
+                name="saveIntent"
+                value="finish"
+                disabled={saving || (scriptChoice === "__custom__" && !newScript.trim())}
+              >
+                Save & finish
+              </button>
+              <button type="button" onClick={changeSession}>Change session</button>
+              <button type="button" onClick={requestClose}>Discard draft</button>
             </div>
           </form>
         )}

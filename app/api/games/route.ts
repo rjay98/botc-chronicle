@@ -15,9 +15,18 @@ type NewAppearance = {
   player?: string;
   character?: string;
   characterType?: CharacterType | "";
+  personalResult?: "win" | "loss" | "";
 };
 
 const CHARACTER_TYPES: CharacterType[] = ["townsfolk", "outsider", "minion", "demon"];
+
+const canonicalScript = (value?: string) => {
+  const name = value?.trim().replace(/\s+/g, " ") ?? "";
+  const key = name.toLowerCase();
+  if (key === "sects and violets" || key === "sects & violets") return "Sects & Violets";
+  if (key === "trouble brewing" || key === "troubled brewing") return "Troubled Brewing";
+  return name;
+};
 
 const OFFICIAL_CHARACTERS = (officialRoles as OfficialRole[])
   .filter((role): role is OfficialRole & { team: CharacterType } =>
@@ -55,7 +64,7 @@ const SEED_GAMES = [
   ["2026-07-08", 1, "Opium Den", "good", ["Both the real and the fake Balloonist had info that kinda matched.", "Both twin Chef infos were wrong because of the No Dashii."]],
   ["2026-07-08", 2, "Sects & Violets", "good", ["Artist, Flower Girl, and Dreamer info narrowed the demon down to one person on day 2."]],
   ["2026-07-08", 3, "Opium Den", "good", ["The Poppy Grower stayed alive the whole game.", "The demon was a Fang Gu — it jumped and died to the Witch."]],
-  ["2026-07-04", 6, "Trouble Brewing", "good", ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman.", "Cam sunk a kill day one to convince town of his Monk bluff — town was further convinced when he hit the Soldier night 2 and seemed to have protected twice in a row."]],
+  ["2026-07-04", 6, "Troubled Brewing", "good", ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman.", "Cam sunk a kill day one to convince town of his Monk bluff — town was further convinced when he hit the Soldier night 2 and seemed to have protected twice in a row."]],
   ["2026-07-01", 1, "Watch Your Mouth V1", "evil", ["Claire told a story about getting into a car accident at Bay to Breakers / Pride — and Michael got mez-turned by asking how it was possible to mix up two events that were months apart.", "Lucy got a sober Empath “2” and never once considered it could be real."]],
   ["2026-07-01", 2, "Watch Your Mouth V1", "good", ["Anastasia was executed because everyone was convinced she was the innocent leech-host Pacifist — when in fact she was the starting Legion.", "Stephen was mez/legion-turned by convincing Lucy there was no Pixel clamshell foldable."]],
   ["2026-07-01", 3, "A Leech of Distrust v2.1", "good", ["Jenny told Lucy she was the Marionette, but Lucy assumed Abhi was the Devil's Advocate because he was triple-claiming Exorcist with Ryan and Jenny."]],
@@ -110,6 +119,11 @@ async function ensureDatabase() {
       name TEXT NOT NULL UNIQUE,
       created_at TEXT NOT NULL
     )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS scripts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    )`),
     db.prepare(`CREATE TABLE IF NOT EXISTS games (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER,
@@ -131,6 +145,7 @@ async function ensureDatabase() {
       character_type TEXT NOT NULL DEFAULT 'townsfolk',
       role_type TEXT,
       alignment TEXT NOT NULL CHECK (alignment IN ('good','evil')),
+      personal_win INTEGER,
       FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
     )`),
     db.prepare(`CREATE TABLE IF NOT EXISTS game_storytellers (
@@ -166,8 +181,23 @@ async function ensureDatabase() {
   if (!appearanceColumns.results.some((column) => column.name === "role_type")) {
     await db.prepare("ALTER TABLE appearances ADD COLUMN role_type TEXT").run();
   }
+  if (!appearanceColumns.results.some((column) => column.name === "personal_win")) {
+    await db.prepare("ALTER TABLE appearances ADD COLUMN personal_win INTEGER").run();
+  }
 
   await db.batch([
+    db.prepare(
+      `UPDATE games SET script = 'Sects & Violets'
+       WHERE lower(trim(script)) IN ('sects and violets', 'sects & violets')`
+    ),
+    db.prepare(
+      `UPDATE games SET script = 'Troubled Brewing'
+       WHERE lower(trim(script)) IN ('trouble brewing', 'troubled brewing')`
+    ),
+    db.prepare(
+      `INSERT OR IGNORE INTO scripts (name, created_at)
+       SELECT DISTINCT trim(script), datetime('now') FROM games WHERE trim(script) <> ''`
+    ),
     db.prepare("CREATE INDEX IF NOT EXISTS games_played_at_idx ON games (played_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS games_session_id_idx ON games (session_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS appearances_game_id_idx ON appearances (game_id)"),
@@ -204,6 +234,23 @@ async function ensureDatabase() {
     ).bind(new Date().toISOString()).run();
   }
   await db.prepare(
+    `UPDATE games
+     SET session_id = (
+       SELECT MIN(canonical.id) FROM sessions AS canonical
+       WHERE canonical.played_at = games.played_at
+     )
+     WHERE EXISTS (
+       SELECT 1 FROM sessions AS duplicate
+       WHERE duplicate.played_at = games.played_at
+     )`
+  ).run();
+  await db.prepare(
+    "DELETE FROM sessions WHERE id NOT IN (SELECT MIN(id) FROM sessions GROUP BY played_at)"
+  ).run();
+  await db.prepare(
+    "CREATE UNIQUE INDEX IF NOT EXISTS sessions_played_at_unique_idx ON sessions (played_at)"
+  ).run();
+  await db.prepare(
     "UPDATE games SET session_id = (SELECT sessions.id FROM sessions WHERE sessions.played_at = games.played_at LIMIT 1) WHERE session_id IS NULL"
   ).run();
 
@@ -222,7 +269,7 @@ async function ensureDatabase() {
 export async function GET() {
   try {
     await ensureDatabase();
-    const [gamesResult, storytellersResult, appearancesResult, sessionsResult, playersResult, charactersResult] =
+    const [gamesResult, storytellersResult, appearancesResult, sessionsResult, playersResult, charactersResult, scriptsResult] =
       await Promise.all([
         env.DB.prepare(
           `SELECT id, session_id AS sessionId, played_at AS playedAt, game_number AS gameNumber,
@@ -235,6 +282,7 @@ export async function GET() {
         ).all<{ gameId: number; storyteller: string }>(),
         env.DB.prepare(
           `SELECT id, game_id AS gameId, player, character, role_type AS characterType,
+             CASE personal_win WHEN 1 THEN 'win' WHEN 0 THEN 'loss' ELSE NULL END AS personalResult,
              CASE
                WHEN role_type IN ('minion', 'demon') THEN 'evil'
                WHEN role_type IN ('townsfolk', 'outsider') THEN 'good'
@@ -255,7 +303,8 @@ export async function GET() {
              is_custom AS isCustom
            FROM characters
            ORDER BY character_type, name COLLATE NOCASE`
-        ).all(),
+          ).all(),
+        env.DB.prepare("SELECT name FROM scripts ORDER BY name COLLATE NOCASE").all<{ name: string }>(),
       ]);
 
     const storytellersByGame = new Map<number, string[]>();
@@ -277,6 +326,7 @@ export async function GET() {
       sessions: sessionsResult.results,
       players: playersResult.results,
       characters: charactersResult.results,
+      scripts: scriptsResult.results.map((script) => script.name),
     });
   } catch (error) {
     return Response.json(
@@ -290,12 +340,14 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     const body = (await request.json()) as {
-      action?: "createSession" | "createPlayer" | "createCharacter" | "addGame";
-      sessionId?: number;
+        action?: "createSession" | "createPlayer" | "createCharacter" | "setPersonalResult" | "addGame";
+        sessionId?: number;
+        gameId?: number;
       playedAt?: string;
       playerName?: string;
       characterName?: string;
-      characterType?: CharacterType;
+        characterType?: CharacterType;
+        personalResult?: "win" | "loss" | null;
       script?: string;
       winner?: Winner | null;
       storytellers?: string[];
@@ -304,16 +356,31 @@ export async function POST(request: Request) {
       appearances?: NewAppearance[];
     };
 
+    if (body.action === "setPersonalResult") {
+      const playerName = body.playerName?.trim();
+      if (!body.gameId || !playerName || !["win", "loss", null].includes(body.personalResult ?? null)) {
+        return Response.json({ error: "Choose a game, player, and valid personal result." }, { status: 400 });
+      }
+      const personalWin = body.personalResult === "win" ? 1 : body.personalResult === "loss" ? 0 : null;
+      const updated = await env.DB.prepare(
+        `UPDATE appearances SET personal_win = ?
+         WHERE game_id = ? AND player = ? COLLATE NOCASE`
+      ).bind(personalWin, body.gameId, playerName).run();
+      return Response.json({ ok: true, changes: updated.meta.changes });
+    }
+
     if (body.action === "createSession") {
       if (!body.playedAt) {
         return Response.json({ error: "Choose a date for the session." }, { status: 400 });
       }
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO sessions (played_at, storyteller, created_at)
+         VALUES (?, '', ?)`
+      ).bind(body.playedAt, new Date().toISOString()).run();
       const session = await env.DB.prepare(
-        `INSERT INTO sessions (played_at, storyteller, created_at)
-         VALUES (?, '', ?)
-         RETURNING id, played_at AS playedAt`
-      ).bind(body.playedAt, new Date().toISOString()).first();
-      return Response.json({ session }, { status: 201 });
+        "SELECT id, played_at AS playedAt FROM sessions WHERE played_at = ? LIMIT 1"
+      ).bind(body.playedAt).first();
+      return Response.json({ session }, { status: 200 });
     }
 
     if (body.action === "createPlayer") {
@@ -368,6 +435,12 @@ export async function POST(request: Request) {
       new Set((body.storytellers ?? []).map((name) => name.trim()).filter(Boolean))
     );
     const winner = body.winner && ["good", "evil"].includes(body.winner) ? body.winner : null;
+    const script = canonicalScript(body.script);
+    if (script) {
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO scripts (name, created_at) VALUES (?, ?)"
+      ).bind(script, new Date().toISOString()).run();
+    }
     const created = await env.DB.prepare(
       `INSERT INTO games
         (session_id, played_at, game_number, script, winner, winning_alignment, storyteller, duration_minutes, notes, created_at)
@@ -378,7 +451,7 @@ export async function POST(request: Request) {
         session.id,
         session.playedAt,
         Number(next?.gameNumber ?? 1),
-        body.script?.trim() ?? "",
+        script,
         winner ?? "good",
         winner,
         storytellers.join(", "),
@@ -395,6 +468,7 @@ export async function POST(request: Request) {
         characterType: CHARACTER_TYPES.includes(row.characterType as CharacterType)
           ? row.characterType as CharacterType
           : null,
+        personalWin: row.personalResult === "win" ? 1 : row.personalResult === "loss" ? 0 : null,
       }))
       .filter((row) => row.player || row.character);
 
@@ -435,9 +509,9 @@ export async function POST(request: Request) {
           const alignment = legacyType === "minion" || legacyType === "demon" ? "evil" : "good";
           return env.DB.prepare(
             `INSERT INTO appearances
-              (game_id, player, character, character_type, role_type, alignment)
-             VALUES (?, ?, ?, ?, ?, ?)`
-          ).bind(created.id, row.player, row.character, legacyType, row.characterType, alignment);
+              (game_id, player, character, character_type, role_type, alignment, personal_win)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(created.id, row.player, row.character, legacyType, row.characterType, alignment, row.personalWin);
         })
       );
     }

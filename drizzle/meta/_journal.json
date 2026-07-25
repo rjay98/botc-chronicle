@@ -22,6 +22,20 @@
       "when": 1784966777532,
       "tag": "0002_hard_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784969712364,
+      "tag": "0003_grey_warbound",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784970192446,
+      "tag": "0004_curved_longshot",
+      "breakpoints": true
     }
   ]
 }

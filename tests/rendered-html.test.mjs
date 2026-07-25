@@ -20,6 +20,17 @@ test("ships the session-first optional game workflow", async () => {
   assert.match(modal, /form\.getAll\("storytellers"\)/);
   assert.match(modal, /Choose category first/);
   assert.match(modal, /Create new character/);
+  assert.match(modal, /Counts as win/);
+  assert.match(modal, /Counts as loss/);
+  assert.match(modal, /Create new script/);
+  assert.match(modal, /Continue session/);
+  assert.match(modal, /Save & finish/);
+  assert.match(modal, /New script name/);
+  assert.match(api, /personal_win/);
+  assert.match(api, /setPersonalResult/);
+  assert.match(api, /canonicalScript/);
+  assert.match(api, /sessions_played_at_unique_idx/);
+  assert.match(api, /INSERT OR IGNORE INTO sessions/);
   assert.doesNotMatch(modal, /name="script"[^>]*required/);
   assert.doesNotMatch(modal, /name="winner"[^>]*required/);
   assert.match(api, /CREATE TABLE IF NOT EXISTS game_storytellers/);
@@ -46,7 +57,11 @@ test("imports the official four-category catalog and artwork", async () => {
 });
 
 test("keeps the live migration additive and preserves unknown values", async () => {
-  const migration = await read("drizzle/0002_hard_bulldozer.sql");
+  const [migration, resultMigration, scriptMigration] = await Promise.all([
+    read("drizzle/0002_hard_bulldozer.sql"),
+    read("drizzle/0003_grey_warbound.sql"),
+    read("drizzle/0004_curved_longshot.sql"),
+  ]);
 
   assert.match(migration, /CREATE TABLE `characters`/);
   assert.match(migration, /CREATE TABLE `game_storytellers`/);
@@ -54,6 +69,12 @@ test("keeps the live migration additive and preserves unknown values", async () 
   assert.match(migration, /ADD `winning_alignment` text/);
   assert.match(migration, /UPDATE `games` SET `winning_alignment` = `winner`/);
   assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM/i);
+  assert.match(resultMigration, /ADD `personal_win` integer/);
+  assert.doesNotMatch(resultMigration, /DROP TABLE|DELETE FROM/i);
+  assert.match(scriptMigration, /CREATE TABLE `scripts`/);
+  assert.match(scriptMigration, /Sects & Violets/);
+  assert.match(scriptMigration, /Troubled Brewing/);
+  assert.doesNotMatch(scriptMigration, /DROP TABLE|DELETE FROM/i);
 });
 
 test("contains the mobile interaction and rendering safeguards", async () => {
@@ -67,6 +88,12 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.match(css, /backdrop-filter:\s*none/);
   assert.match(css, /font-size:\s*16px/);
   assert.match(css, /safe-area-inset-bottom/);
+  assert.match(css, /scrollbar-width:\s*none/);
+  assert.match(css, /@keyframes open-ledger/);
+  assert.match(css, /prefers-reduced-motion/);
   assert.match(dashboard, /loading="lazy"/);
+  assert.match(dashboard, /appearance\.personalResult/);
+  assert.match(dashboard, /Good alignment/);
+  assert.match(dashboard, /Most on one role/);
   assert.match(modal, /export default function SessionModal/);
 });

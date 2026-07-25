@@ -30,7 +30,13 @@ type Appearance = {
   character: string;
   characterType?: CharacterType | null;
   alignment: "good" | "evil" | null;
+  personalResult?: "win" | "loss" | null;
 };
+
+type PlayerSort = "appearances" | "win-rate" | "wins" | "roles" | "top-role" | "name";
+type PlayerFilter = "all" | "active" | "unplayed";
+type PlayerScope = "all" | "good" | "evil" | CharacterType;
+type CharacterSort = "usage" | "name" | "win-rate";
 
 const FALLBACK_GAMES: Game[] = [
   { id: 1, playedAt: "2026-07-16", gameNumber: 4, script: "Sects & Violets", winner: "evil", storytellers: [], storyteller: "", durationMinutes: null, notes: ["The only good player left was executed in the final three."] },
@@ -40,7 +46,7 @@ const FALLBACK_GAMES: Game[] = [
   { id: 5, playedAt: "2026-07-08", gameNumber: 3, script: "Opium Den", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["The Poppy Grower stayed alive the whole game.", "The demon was a Fang Gu — it jumped and died to the Witch."] },
   { id: 6, playedAt: "2026-07-08", gameNumber: 2, script: "Sects & Violets", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Artist, Flower Girl, and Dreamer info narrowed the demon down to one person on day 2."] },
   { id: 7, playedAt: "2026-07-08", gameNumber: 1, script: "Opium Den", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Both twin Chef infos were wrong because of the No Dashii."] },
-  { id: 8, playedAt: "2026-07-04", gameNumber: 6, script: "Trouble Brewing", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman."] },
+  { id: 8, playedAt: "2026-07-04", gameNumber: 6, script: "Troubled Brewing", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan was the drunk, poisoned, red-herring Investigator who saw Andrew the Ravenkeeper and Jenny the Saint as the Scarlet Woman."] },
   { id: 9, playedAt: "2026-07-01", gameNumber: 6, script: "A Leech of Distrust v2.1", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan told Abhi he was the Marionette, but Michael convinced Abhi he was being played."] },
   { id: 10, playedAt: "2026-07-01", gameNumber: 5, script: "A Leech of Distrust v2.1", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Michael cold-called that he was the leech host — based purely on vibes. He was right."] },
   { id: 11, playedAt: "2026-07-01", gameNumber: 4, script: "A Leech of Distrust v2.1", winner: "good", storytellers: [], storyteller: "", durationMinutes: null, notes: ["Ryan slayed Michael, the leech host, on day one."] },
@@ -67,12 +73,21 @@ export default function ChronicleDashboard() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [players, setPlayers] = useState<PlayerRecord[]>([]);
   const [characters, setCharacters] = useState<CharacterRecord[]>([]);
+  const [scriptCatalog, setScriptCatalog] = useState<string[]>([]);
   const [view, setView] = useState<"overview" | "players" | "characters" | "games">("overview");
   const [modalOpen, setModalOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [scriptFilter, setScriptFilter] = useState("All scripts");
   const [characterFilter, setCharacterFilter] = useState<"all" | CharacterType>("all");
+  const [characterSearch, setCharacterSearch] = useState("");
+  const [characterSort, setCharacterSort] = useState<CharacterSort>("usage");
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [playerSort, setPlayerSort] = useState<PlayerSort>("appearances");
+  const [playerFilter, setPlayerFilter] = useState<PlayerFilter>("all");
+  const [playerScope, setPlayerScope] = useState<PlayerScope>("all");
+  const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [entered, setEntered] = useState(false);
   const [message, setMessage] = useState("");
 
   const loadGames = async () => {
@@ -85,6 +100,7 @@ export default function ChronicleDashboard() {
       setSessions(data.sessions ?? []);
       setPlayers(data.players ?? []);
       setCharacters(data.characters ?? []);
+      setScriptCatalog(data.scripts ?? []);
     } catch {
       setMessage("Showing the imported ledger while the shared archive connects.");
     } finally {
@@ -95,6 +111,15 @@ export default function ChronicleDashboard() {
   useEffect(() => {
     loadGames();
   }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [view, playerScope, playerFilter, characterFilter]);
 
   const stats = useMemo(() => {
     const good = games.filter((game) => game.winner === "good").length;
@@ -117,7 +142,26 @@ export default function ChronicleDashboard() {
       .sort((a, b) => b.games - a.games || (b.rate ?? -1) - (a.rate ?? -1));
 
     const gamesById = new Map(games.map((game) => [game.id, game]));
-    const playerMap = new Map<string, { games: number; wins: number; decided: number; good: number; evil: number }>();
+    const playerMap = new Map<string, {
+      games: number;
+      wins: number;
+      decided: number;
+      good: number;
+      evil: number;
+      roles: Map<string, { count: number; type: CharacterType | null }>;
+      recent: Appearance[];
+    }>();
+    players.forEach((player) => {
+      playerMap.set(player.name, {
+        games: 0,
+        wins: 0,
+        decided: 0,
+        good: 0,
+        evil: 0,
+        roles: new Map(),
+        recent: [],
+      });
+    });
     appearances.forEach((appearance) => {
       if (!appearance.player) return;
       const game = gamesById.get(appearance.gameId);
@@ -127,11 +171,26 @@ export default function ChronicleDashboard() {
         decided: 0,
         good: 0,
         evil: 0,
+        roles: new Map(),
+        recent: [],
       };
       current.games += 1;
       current.good += appearance.alignment === "good" ? 1 : 0;
       current.evil += appearance.alignment === "evil" ? 1 : 0;
-      if (game?.winner && appearance.alignment) {
+      if (appearance.character) {
+        const role = current.roles.get(appearance.character) ?? {
+          count: 0,
+          type: appearance.characterType ?? null,
+        };
+        role.count += 1;
+        role.type = role.type ?? appearance.characterType ?? null;
+        current.roles.set(appearance.character, role);
+      }
+      current.recent.push(appearance);
+      if (appearance.personalResult) {
+        current.decided += 1;
+        current.wins += appearance.personalResult === "win" ? 1 : 0;
+      } else if (game?.winner && appearance.alignment) {
         current.decided += 1;
         current.wins += game.winner === appearance.alignment ? 1 : 0;
       }
@@ -144,7 +203,10 @@ export default function ChronicleDashboard() {
       const game = gamesById.get(appearance.gameId);
       const current = characterMap.get(appearance.character) ?? { games: 0, wins: 0, decided: 0 };
       current.games += 1;
-      if (game?.winner && appearance.alignment) {
+      if (appearance.personalResult) {
+        current.decided += 1;
+        current.wins += appearance.personalResult === "win" ? 1 : 0;
+      } else if (game?.winner && appearance.alignment) {
         current.decided += 1;
         current.wins += game.winner === appearance.alignment ? 1 : 0;
       }
@@ -160,11 +222,100 @@ export default function ChronicleDashboard() {
       dates,
       scriptRows,
       players: [...playerMap]
-        .map(([name, data]) => ({ name, ...data }))
+        .map(([name, data]) => ({
+          name,
+          ...data,
+          roles: [...data.roles]
+            .map(([role, roleData]) => ({ role, ...roleData }))
+            .sort((a, b) => b.count - a.count || a.role.localeCompare(b.role)),
+          recent: data.recent
+            .slice()
+            .sort((a, b) => {
+              const gameA = gamesById.get(a.gameId);
+              const gameB = gamesById.get(b.gameId);
+              return (gameB?.playedAt ?? "").localeCompare(gameA?.playedAt ?? "")
+                || (gameB?.gameNumber ?? 0) - (gameA?.gameNumber ?? 0);
+            }),
+        }))
         .sort((a, b) => b.games - a.games),
       characterMap,
     };
-  }, [games, appearances]);
+  }, [games, appearances, players]);
+
+  const characterByName = useMemo(
+    () => new Map(characters.map((character) => [character.name.toLowerCase(), character])),
+    [characters]
+  );
+
+  const visiblePlayers = useMemo(() => {
+    const query = playerSearch.trim().toLowerCase();
+    const gamesById = new Map(games.map((game) => [game.id, game]));
+    return stats.players
+      .map((player) => {
+        if (playerScope === "all") return player;
+        const scopedAppearances = player.recent.filter((appearance) =>
+          playerScope === "good" || playerScope === "evil"
+            ? appearance.alignment === playerScope
+            : appearance.characterType === playerScope
+        );
+        const roleMap = new Map<string, { count: number; type: CharacterType | null }>();
+        let wins = 0;
+        let decided = 0;
+        scopedAppearances.forEach((appearance) => {
+          if (appearance.character) {
+            const role = roleMap.get(appearance.character) ?? {
+              count: 0,
+              type: appearance.characterType ?? null,
+            };
+            role.count += 1;
+            roleMap.set(appearance.character, role);
+          }
+          const game = gamesById.get(appearance.gameId);
+          if (appearance.personalResult) {
+            decided += 1;
+            wins += appearance.personalResult === "win" ? 1 : 0;
+          } else if (game?.winner && appearance.alignment) {
+            decided += 1;
+            wins += game.winner === appearance.alignment ? 1 : 0;
+          }
+        });
+        return {
+          ...player,
+          games: scopedAppearances.length,
+          wins,
+          decided,
+          good: scopedAppearances.filter((appearance) => appearance.alignment === "good").length,
+          evil: scopedAppearances.filter((appearance) => appearance.alignment === "evil").length,
+          recent: scopedAppearances,
+          roles: [...roleMap]
+            .map(([role, roleData]) => ({ role, ...roleData }))
+            .sort((a, b) => b.count - a.count || a.role.localeCompare(b.role)),
+        };
+      })
+      .filter((player) => {
+        if (playerScope !== "all" && player.games === 0) return false;
+        if (playerFilter === "active" && player.games === 0) return false;
+        if (playerFilter === "unplayed" && player.games > 0) return false;
+        return !query
+          || player.name.toLowerCase().includes(query)
+          || player.roles.some(({ role }) => role.toLowerCase().includes(query));
+      })
+      .sort((a, b) => {
+        if (playerSort === "name") return a.name.localeCompare(b.name);
+        if (playerSort === "win-rate") {
+          const rateA = a.decided ? a.wins / a.decided : -1;
+          const rateB = b.decided ? b.wins / b.decided : -1;
+          return rateB - rateA || b.games - a.games || a.name.localeCompare(b.name);
+        }
+        if (playerSort === "wins") return b.wins - a.wins || b.games - a.games || a.name.localeCompare(b.name);
+        if (playerSort === "roles") return b.roles.length - a.roles.length || b.games - a.games || a.name.localeCompare(b.name);
+        if (playerSort === "top-role") return (b.roles[0]?.count ?? 0) - (a.roles[0]?.count ?? 0) || b.games - a.games || a.name.localeCompare(b.name);
+        return b.games - a.games || b.wins - a.wins || a.name.localeCompare(b.name);
+      });
+  }, [stats.players, games, playerFilter, playerScope, playerSearch, playerSort]);
+
+  const activePlayerCount = stats.players.filter((player) => player.games > 0).length;
+  const lineupCount = appearances.filter((appearance) => appearance.player).length;
 
   const filteredGames = games.filter((game) => {
     const matchesScript = scriptFilter === "All scripts" || game.script === scriptFilter;
@@ -174,11 +325,20 @@ export default function ChronicleDashboard() {
 
   const catalogCharacters = characters
     .filter((character) => characterFilter === "all" || character.characterType === characterFilter)
+    .filter((character) => character.name.toLowerCase().includes(characterSearch.trim().toLowerCase()))
     .map((character) => ({
       ...character,
       ...(stats.characterMap.get(character.name) ?? { games: 0, wins: 0, decided: 0 }),
     }))
-    .sort((a, b) => b.games - a.games || a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      if (characterSort === "name") return a.name.localeCompare(b.name);
+      if (characterSort === "win-rate") {
+        const rateA = a.decided ? a.wins / a.decided : -1;
+        const rateB = b.decided ? b.wins / b.decided : -1;
+        return rateB - rateA || b.games - a.games || a.name.localeCompare(b.name);
+      }
+      return b.games - a.games || a.name.localeCompare(b.name);
+    });
 
   const openSessionModal = () => setModalOpen(true);
 
@@ -217,19 +377,22 @@ export default function ChronicleDashboard() {
         </a>
       </aside>
 
-      <div className="content-shell">
+      <div className={`content-shell${entered ? " page-ready" : ""}`}>
+        <div className={`page-turn${entered ? " open" : ""}`} aria-hidden="true">
+          <span className="brand-mark"><span>12</span></span>
+        </div>
         {message && (
           <div className="toast" role="status">
             {message}<button onClick={() => setMessage("")}>×</button>
           </div>
         )}
 
-        <section className="view-heading">
+        <section className={`view-heading${view === "overview" ? "" : " compact"}`}>
           <div>
             <p className="eyebrow">{view === "overview" ? "Collective record" : `Archive / ${view}`}</p>
             <h1>
               {view === "overview"
-                ? "Group overview"
+                ? "Overview"
                 : view === "players"
                   ? "Players"
                   : view === "characters"
@@ -237,15 +400,15 @@ export default function ChronicleDashboard() {
                     : "Games"}
             </h1>
             <p className="subtitle">
-              {view === "overview" && "Wins, scripts, trends, and recent games—all in one place."}
+              {view === "overview" && "Collective wins, scripts, trends, and recent games."}
               {view === "players" && "Performance across alignments and appearances, calculated from logged lineups."}
               {view === "characters" && `${characters.length} official and custom characters, ready to log.`}
               {view === "games" && `${games.length} games, preserved from newest to oldest.`}
             </p>
           </div>
           {(view === "overview" || view === "games") && (
-            <button className="primary-action" onClick={openSessionModal}>
-              <span>＋</span> Start session
+            <button className="primary-action header-action" onClick={openSessionModal} aria-label="Start session">
+              <span>＋</span><span className="action-label">Game</span>
             </button>
           )}
         </section>
@@ -258,7 +421,7 @@ export default function ChronicleDashboard() {
                 <strong>{String(games.length).padStart(2, "0")}</strong>
                 <p>across {stats.dates.length} game nights</p>
                 <div className="mini-timeline">
-                  {stats.dates.slice().reverse().map((date, index) => {
+                  {stats.dates.slice().reverse().map((date) => {
                     const count = games.filter((game) => game.playedAt === date).length;
                     return (
                       <span
@@ -266,7 +429,8 @@ export default function ChronicleDashboard() {
                         style={{ height: `${20 + count * 8}px` }}
                         title={`${shortDate(date)}: ${count} games`}
                       >
-                        <i>{index + 1}</i>
+                        <em>{count}</em>
+                        <i>{shortDate(date)}</i>
                       </span>
                     );
                   })}
@@ -278,6 +442,10 @@ export default function ChronicleDashboard() {
                 <div className="alignment-row evil"><span>●</span><b>{stats.evil}</b><p>Evil victories</p></div>
                 {stats.unknown > 0 && <div className="unknown-results">{stats.unknown} unrecorded</div>}
                 <div className="balance-bar"><span style={{ width: `${stats.goodRate}%` }} /></div>
+                <div className="balance-legend">
+                  <span>Good {stats.goodRate}%</span>
+                  <span>Evil {100 - stats.goodRate}%</span>
+                </div>
               </article>
               <article className="metric-card">
                 <span className="metric-kicker">Scripts played</span>
@@ -345,18 +513,160 @@ export default function ChronicleDashboard() {
         {view === "players" && (
           <section className="data-view">
             {stats.players.length ? (
-              <div className="leader-grid">
-                {stats.players.map((player, index) => (
-                  <article className="leader-card" key={player.name}>
-                    <span className="rank">#{String(index + 1).padStart(2, "0")}</span>
-                    <div className="avatar">{player.name.slice(0, 2).toUpperCase()}</div>
-                    <h2>{player.name}</h2>
-                    <p>{player.games} appearance{player.games === 1 ? "" : "s"}</p>
-                    <strong>{player.decided ? `${Math.round((player.wins / player.decided) * 100)}%` : "—"}</strong>
-                    <small>win rate</small>
-                    <div className="alignment-split"><span>{player.good} good</span><span>{player.evil} evil</span></div>
-                  </article>
-                ))}
+              <div className="player-analytics">
+                <div className="player-summary" aria-label="Player statistics summary">
+                  <div><strong>{stats.players.length}</strong><span>in the roster</span></div>
+                  <div><strong>{activePlayerCount}</strong><span>with lineups</span></div>
+                  <div><strong>{lineupCount}</strong><span>seats logged</span></div>
+                </div>
+
+                <div className="player-controls">
+                  <label className="player-search">
+                    <span aria-hidden="true">⌕</span>
+                    <input
+                      value={playerSearch}
+                      onChange={(event) => setPlayerSearch(event.target.value)}
+                      placeholder="Find player or role"
+                      aria-label="Search players and roles"
+                    />
+                  </label>
+                  <label className="player-sort">
+                    <span>Sort</span>
+                    <select
+                      value={playerSort}
+                      onChange={(event) => setPlayerSort(event.target.value as PlayerSort)}
+                    >
+                      <option value="appearances">Most appearances</option>
+                      <option value="win-rate">Highest win rate</option>
+                      <option value="wins">Most wins</option>
+                      <option value="roles">Most roles played</option>
+                      <option value="top-role">Most on one role</option>
+                      <option value="name">Name A–Z</option>
+                    </select>
+                  </label>
+                  <label className="player-sort player-scope">
+                    <span>Scope</span>
+                    <select
+                      value={playerScope}
+                      onChange={(event) => setPlayerScope(event.target.value as PlayerScope)}
+                    >
+                      <option value="all">Overall</option>
+                      <option value="good">Good alignment</option>
+                      <option value="evil">Evil alignment</option>
+                      <option value="townsfolk">Townsfolk</option>
+                      <option value="outsider">Outsider</option>
+                      <option value="minion">Minion</option>
+                      <option value="demon">Demon</option>
+                    </select>
+                  </label>
+                  <div className="player-filter" role="group" aria-label="Filter player activity">
+                    {(["all", "active", "unplayed"] as const).map((filter) => (
+                      <button
+                        key={filter}
+                        className={playerFilter === filter ? "active" : ""}
+                        onClick={() => setPlayerFilter(filter)}
+                      >
+                        {filter}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="player-board">
+                  <div className="player-board-head" aria-hidden="true">
+                    <span>Rank / player</span><span>Recent roles</span><span>Record</span><span>Win rate</span>
+                  </div>
+                  {visiblePlayers.map((player, index) => {
+                    const isExpanded = expandedPlayer === player.name;
+                    const rate = player.decided ? Math.round((player.wins / player.decided) * 100) : null;
+                    return (
+                      <article className={`player-row${isExpanded ? " expanded" : ""}`} key={player.name}>
+                        <button
+                          className="player-row-main"
+                          onClick={() => setExpandedPlayer(isExpanded ? null : player.name)}
+                          aria-expanded={isExpanded}
+                        >
+                          <span className="player-rank">{String(index + 1).padStart(2, "0")}</span>
+                          <span className="player-avatar">{player.name.slice(0, 2).toUpperCase()}</span>
+                          <span className="player-identity">
+                            <strong>{player.name}</strong>
+                            <small>
+                              {player.games} appearance{player.games === 1 ? "" : "s"}
+                              {player.roles[0] ? ` · top ${player.roles[0].role}${player.roles[0].count > 1 ? ` ×${player.roles[0].count}` : ""}` : " · no roles"}
+                            </small>
+                          </span>
+                          <span className="player-roles">
+                            {player.roles.slice(0, 3).map(({ role, type }) => {
+                              const character = characterByName.get(role.toLowerCase());
+                              return (
+                                <span className={`player-role-icon ${type ?? ""}`} key={role} title={role}>
+                                  {character?.imageUrl
+                                    ? <img src={character.imageUrl} alt="" loading="lazy" />
+                                    : role.slice(0, 2).toUpperCase()}
+                                </span>
+                              );
+                            })}
+                            {player.roles.length === 0 && <small>No roles yet</small>}
+                          </span>
+                          <span className="player-record"><strong>{player.wins}W</strong><small>{player.decided - player.wins}L</small></span>
+                          <span className="player-rate">
+                            <strong>{rate === null ? "—" : `${rate}%`}</strong>
+                            <i><span style={{ width: `${rate ?? 0}%` }} /></i>
+                          </span>
+                          <span className="player-chevron" aria-hidden="true">⌄</span>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="player-detail">
+                            <div className="player-detail-stat">
+                              <span>Alignment history</span>
+                              <strong><i className="good-dot" />{player.good} good</strong>
+                              <strong><i className="evil-dot" />{player.evil} evil</strong>
+                            </div>
+                            <div className="player-role-history">
+                              <span>Roles played</span>
+                              <div>
+                                {player.roles.length ? player.roles.map(({ role, count, type }) => {
+                                  const character = characterByName.get(role.toLowerCase());
+                                  return (
+                                    <span className="role-chip" key={role}>
+                                      <span className={`player-role-icon ${type ?? ""}`}>
+                                        {character?.imageUrl
+                                          ? <img src={character.imageUrl} alt="" loading="lazy" />
+                                          : role.slice(0, 2).toUpperCase()}
+                                      </span>
+                                      <b>{role}</b>{count > 1 && <small>×{count}</small>}
+                                    </span>
+                                  );
+                                }) : <small className="no-player-data">No character data recorded yet.</small>}
+                              </div>
+                            </div>
+                            <div className="player-recent">
+                              <span>Recent games</span>
+                              <div>
+                                {player.recent.length ? player.recent.slice(0, 3).map((appearance) => {
+                                  const game = games.find((entry) => entry.id === appearance.gameId);
+                                  return (
+                                    <span key={appearance.id}>
+                                      <b>{appearance.character || "Unknown role"}</b>
+                                      <small>
+                                        {game ? `${shortDate(game.playedAt)} · ${displayScript(game.script)}` : "Game details unavailable"}
+                                        {appearance.personalResult ? ` · ${appearance.personalResult === "win" ? "counted as win" : "counted as loss"}` : ""}
+                                      </small>
+                                    </span>
+                                  );
+                                }) : <small className="no-player-data">No appearances logged yet.</small>}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                  {visiblePlayers.length === 0 && (
+                    <div className="player-no-results">No players match these filters.</div>
+                  )}
+                </div>
               </div>
             ) : (
               <EmptyState type="players" onAdd={openSessionModal} />
@@ -366,6 +676,26 @@ export default function ChronicleDashboard() {
 
         {view === "characters" && (
           <section className="data-view">
+            <div className="character-toolbar">
+              <label>
+                <span aria-hidden="true">⌕</span>
+                <input
+                  value={characterSearch}
+                  onChange={(event) => setCharacterSearch(event.target.value)}
+                  placeholder="Find a character"
+                  aria-label="Search characters"
+                />
+              </label>
+              <select
+                value={characterSort}
+                onChange={(event) => setCharacterSort(event.target.value as CharacterSort)}
+                aria-label="Sort characters"
+              >
+                <option value="usage">Most played</option>
+                <option value="name">Name A–Z</option>
+                <option value="win-rate">Win rate</option>
+              </select>
+            </div>
             <div className="character-filters" role="group" aria-label="Filter characters by category">
               {(["all", "townsfolk", "outsider", "minion", "demon"] as const).map((type) => (
                 <button
@@ -381,7 +711,7 @@ export default function ChronicleDashboard() {
               {catalogCharacters.map((character, index) => (
                 <article key={character.id}>
                   <span>{String(index + 1).padStart(2, "0")}</span>
-                  <div className={`role-seal ${character.characterType}`}>
+                  <div className={`role-seal ${character.characterType}`} data-fallback={character.name.slice(0, 2).toUpperCase()}>
                     <img src={character.imageUrl} alt="" loading="lazy" />
                   </div>
                   <div>
@@ -462,13 +792,22 @@ export default function ChronicleDashboard() {
             games={games}
             players={players}
             characters={characters}
+            scripts={scriptCatalog}
             onClose={() => setModalOpen(false)}
             onDataChange={loadGames}
             onMessage={setMessage}
           />
         )}
 
-        {loading && <div className="loading-line" />}
+        {loading && (
+          <>
+            <div className="loading-line" />
+            <div className="ledger-loader" role="status">
+              <span className="loader-ring">12</span>
+              <small>Opening the ledger</small>
+            </div>
+          </>
+        )}
       </div>
     </main>
   );

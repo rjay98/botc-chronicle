@@ -13,6 +13,12 @@ export const players = sqliteTable("players", {
   createdAt: text("created_at").notNull(),
 });
 
+export const scripts = sqliteTable("scripts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  createdAt: text("created_at").notNull(),
+});
+
 export const games = sqliteTable("games", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   sessionId: integer("session_id"),
@@ -45,6 +51,7 @@ export const appearances = sqliteTable("appearances", {
     enum: ["townsfolk", "outsider", "minion", "demon"],
   }),
   alignment: text("alignment", { enum: ["good", "evil"] }).notNull(),
+  personalWin: integer("personal_win", { mode: "boolean" }),
 });
 
 export const characters = sqliteTable("characters", {
