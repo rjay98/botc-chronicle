@@ -100,6 +100,9 @@ button { color: inherit; }
 .side-rail nav button:hover, .side-rail nav button.active { color: var(--ink); border-left-color: var(--red); background: linear-gradient(90deg, rgba(183,53,66,.15), rgba(255,255,255,.025)); }
 .side-rail > .primary-action { width: 100%; margin-top: 34px; justify-self: auto; }
 .rail-caption { margin: auto 6px 0; color: #989287; font: italic 11px/1.55 Georgia, serif; }
+.ccc-mark { display: block; width: 104px; margin: 18px 5px 0; opacity: .58; transition: opacity .2s ease; }
+.ccc-mark:hover { opacity: .9; }
+.ccc-mark img { display: block; width: 100%; height: auto; }
 
 .primary-action {
   justify-self: end;
@@ -199,6 +202,7 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .alignment-row p { margin: 0; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .alignment-row.evil { margin-top: 13px; }
 .alignment-row.evil > span { color: var(--evil); font-size: 14px; }
+.unknown-results { margin: 12px 0 -10px 39px; color: var(--muted); font-size: 8px; letter-spacing: .09em; text-transform: uppercase; }
 .balance-bar { margin-top: 26px; height: 4px; background: var(--red); }
 .balance-bar span { display: block; height: 100%; background: var(--gold); }
 
@@ -240,6 +244,7 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .recent-game:last-child { border: 0; }
 .verdict-dot { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: rgba(198,161,90,.16); color: var(--gold); font-size: 10px; }
 .verdict-dot.evil { background: rgba(183,53,66,.17); color: #d85a66; }
+.verdict-dot.unknown { background: rgba(255,255,255,.055); color: var(--muted); }
 .recent-game b, .recent-game small { display: block; }
 .recent-game b { font: 14px Georgia, serif; }
 .recent-game small { color: var(--muted); font-size: 9px; margin-top: 5px; }
@@ -257,11 +262,15 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .alignment-split { display: flex; justify-content: center; gap: 8px; margin-top: 22px; }
 .alignment-split span { padding: 6px 9px; border: 1px solid var(--line); font-size: 9px; text-transform: uppercase; }
 
+.character-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.character-filters button { padding: 9px 13px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
+.character-filters button:hover, .character-filters button.active { color: var(--ink); border-color: var(--red); background: rgba(183,53,66,.12); }
 .character-list { border-top: 1px solid var(--line); }
-.character-list article { min-height: 92px; display: grid; grid-template-columns: 45px 54px 1fr 100px 100px; gap: 20px; align-items: center; border-bottom: 1px solid var(--line); }
+.character-list article { min-height: 92px; display: grid; grid-template-columns: 45px 54px 1fr 100px 100px; gap: 20px; align-items: center; border-bottom: 1px solid var(--line); content-visibility: auto; contain-intrinsic-size: 92px; }
 .character-list article > span { color: var(--muted); font-size: 9px; }
-.role-seal { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: rgba(198,161,90,.15); color: var(--gold); border: 1px solid rgba(198,161,90,.24); }
-.role-seal.evil { background: rgba(183,53,66,.15); color: #d65561; border-color: rgba(183,53,66,.26); }
+.role-seal { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: rgba(198,161,90,.1); border: 1px solid rgba(198,161,90,.22); overflow: hidden; }
+.role-seal.minion, .role-seal.demon { background: rgba(183,53,66,.1); border-color: rgba(183,53,66,.24); }
+.role-seal img { width: 44px; height: 44px; object-fit: contain; }
 .character-list h2 { margin: 0; font-size: 20px; font-weight: 400; }
 .character-list p { margin: 4px 0 0; color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .character-list strong { font: 22px Georgia, serif; }
@@ -292,6 +301,7 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .game-copy > div:first-child > small { color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .verdict-pill { display: inline-block; padding: 6px 9px; background: rgba(198,161,90,.14); color: #d8b66d; border: 1px solid rgba(198,161,90,.17); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; border-radius: 3px; }
 .verdict-pill.evil { background: rgba(183,53,66,.15); color: #db6873; border-color: rgba(183,53,66,.2); }
+.verdict-pill.unknown { background: rgba(255,255,255,.045); color: var(--muted); border-color: var(--line); }
 .game-copy h2 { margin: 12px 0 13px; font-size: 27px; font-weight: 400; }
 .game-copy ul { margin: 0; padding: 0; list-style: none; max-width: 850px; }
 .game-copy li { color: var(--muted); font: 14px/1.6 Georgia, serif; }
@@ -317,9 +327,11 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .modal-scroll::-webkit-scrollbar-track { background: transparent; }
 .modal-scroll::-webkit-scrollbar-thumb { background: #453640; border: 3px solid #151116; border-radius: 10px; }
 .session-start-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.session-start-grid.one-column { grid-template-columns: minmax(220px, 380px); }
 .session-start-grid label,
 .game-fields label,
 .notes-field { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.game-fields label small { float: right; font-weight: 400; letter-spacing: 0; text-transform: none; }
 .session-start-grid input,
 .game-fields input,
 .game-fields select,
@@ -348,11 +360,26 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .session-lock strong { font: 16px Georgia, serif; }
 .session-lock small { color: var(--muted); font-size: 9px; }
 .game-fields { display: grid; grid-template-columns: 1fr .55fr .5fr; gap: 12px; margin-top: 22px; }
-.lineup-head, .lineup-row { display: grid; grid-template-columns: 1fr 1.1fr .8fr 32px; gap: 9px; align-items: center; }
+.storyteller-field { margin: 22px 0 0; padding: 0; border: 0; }
+.storyteller-field legend { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.storyteller-field legend small { margin-left: 5px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.storyteller-options { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.storyteller-options label { position: relative; cursor: pointer; }
+.storyteller-options input { position: absolute; opacity: 0; pointer-events: none; }
+.storyteller-options span { display: block; padding: 8px 11px; border: 1px solid var(--line); border-radius: 999px; background: #100e12; color: var(--muted); font-size: 9px; }
+.storyteller-options input:checked + span { border-color: var(--gold); background: rgba(198,161,90,.11); color: var(--ink); }
+.storyteller-options input:focus-visible + span { outline: 2px solid var(--red); outline-offset: 2px; }
+.lineup-head, .lineup-row { display: grid; grid-template-columns: .9fr .75fr 1.2fr 32px; gap: 9px; align-items: center; }
 .lineup-head { padding: 0 4px 7px; color: #7e756e; font-size: 8px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .lineup-rows { display: grid; gap: 8px; }
 .lineup-row { padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.018); }
 .lineup-row input, .lineup-row select { margin: 0; height: 40px; }
+.character-select-wrap { position: relative; }
+.character-select-wrap img { position: absolute; z-index: 1; left: 5px; top: 3px; width: 34px; height: 34px; object-fit: contain; pointer-events: none; }
+.character-select-wrap img + select { padding-left: 42px; }
+.character-select-wrap select:disabled { opacity: .52; cursor: not-allowed; }
+.custom-character-input { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.custom-character-input button { min-width: 44px; border: 1px solid var(--line); border-radius: 5px; background: #201a20; color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; cursor: pointer; }
 .remove-row { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; }
 .remove-row:hover:not(:disabled) { border-color: var(--red); color: #dc6b75; }
 .remove-row:disabled { opacity: .3; cursor: default; }
@@ -380,7 +407,7 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 @media (max-width: 1050px) {
   .content-shell { margin-left: 0; padding-bottom: 80px; }
   .side-rail { width: auto; height: 60px; inset: auto 0 0; padding: 0; border: 0; border-top: 1px solid var(--line); }
-  .side-rail .brand, .side-rail > .primary-action, .rail-caption { display: none; }
+  .side-rail .brand, .side-rail > .primary-action, .rail-caption, .ccc-mark { display: none; }
   .side-rail nav { height: 100%; flex-direction: row; gap: 0; margin: 0; }
   .side-rail nav button { flex: 1; padding: 0 5px; font-size: 9px; border-left: 0; border-top: 2px solid transparent; text-align: center; }
   .side-rail nav button.active { border-top-color: var(--red); border-left-color: transparent; }
@@ -393,6 +420,7 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 
 @media (max-width: 700px) {
   .primary-action { padding: 10px 12px; font-size: 9px; }
+  button, .primary-action { min-height: 44px; }
   .view-heading { min-height: 0; padding: 30px 22px 24px; align-items: center; gap: 16px; }
   .view-heading h1 { font-size: 38px; }
   .view-heading > .primary-action { white-space: nowrap; }
@@ -415,25 +443,40 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
   .date-block { padding-right: 16px; }
   .date-block strong { font-size: 31px; }
   .game-copy h2 { font-size: 22px; }
-  .modal-backdrop { padding: 0; }
+  .modal-backdrop { padding: 0; backdrop-filter: none; background: rgba(5,4,7,.94); }
   .modal { width: 100%; height: 100dvh; max-height: 100dvh; padding: 0; border: 0; border-top: 3px solid var(--red); border-radius: 0; }
   .modal-header { padding: 21px 18px 17px; }
+  .modal-close { width: 44px; height: 44px; }
   .modal h2 { font-size: 32px; }
   .modal-intro { padding-right: 8px; }
   .modal-scroll { padding: 18px 18px 24px; }
-  .modal-actions { padding: 12px 18px; flex-wrap: wrap; }
+  .modal-actions { padding: 12px 18px calc(12px + env(safe-area-inset-bottom)); flex-wrap: wrap; box-shadow: 0 -16px 30px rgba(0,0,0,.24); }
+  .modal-actions button { min-height: 46px; }
   .modal-actions .save-button { order: -1; flex: 1 0 100%; }
   .session-start-grid { grid-template-columns: 1fr; }
   .session-lock { grid-template-columns: 1fr auto; }
   .session-lock small { grid-column: 1 / -1; }
   .game-fields { grid-template-columns: 1fr 1fr; }
   .game-fields label:first-child { grid-column: 1 / -1; }
+  .session-start-grid input,
+  .game-fields input,
+  .game-fields select,
+  .notes-field textarea,
+  .lineup-row input,
+  .lineup-row select,
+  .roster-add input { min-height: 48px; font-size: 16px; }
+  .storyteller-options { flex-wrap: nowrap; overflow-x: auto; margin-inline: -18px; padding: 2px 18px 8px; scrollbar-width: none; }
+  .storyteller-options::-webkit-scrollbar { display: none; }
+  .storyteller-options label { flex: 0 0 auto; }
+  .storyteller-options span { min-height: 42px; display: grid; place-items: center; padding-inline: 14px; }
   .lineup-head { display: none; }
-  .lineup-row { grid-template-columns: 1fr 1fr 32px; align-items: center; }
+  .lineup-row { grid-template-columns: 1fr 1fr 42px; align-items: center; padding: 10px; }
   .lineup-row label:nth-child(3) { grid-column: 1 / 3; }
   .lineup-row .remove-row { grid-column: 3; grid-row: 1 / 3; }
+  .remove-row { width: 40px; height: 40px; }
+  .character-select-wrap img { top: 7px; }
   .roster-add { grid-template-columns: 1fr; }
-  .roster-add button { min-height: 38px; }
+  .roster-add button { min-height: 46px; }
   .form-grid { grid-template-columns: 1fr 1fr; }
   .form-grid label:nth-child(5), .form-grid label:nth-child(6) { grid-column: auto; }
 }

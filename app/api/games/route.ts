@@ -1,12 +1,38 @@
 import { env } from "cloudflare:workers";
+import officialRoles from "../../../data/official-roles.json";
 
 type CharacterType = "townsfolk" | "outsider" | "minion" | "demon";
+type Winner = "good" | "evil";
+
+type OfficialRole = {
+  id: string;
+  name: string;
+  team: string;
+  edition: string;
+};
 
 type NewAppearance = {
   player?: string;
   character?: string;
-  characterType?: CharacterType;
+  characterType?: CharacterType | "";
 };
+
+const CHARACTER_TYPES: CharacterType[] = ["townsfolk", "outsider", "minion", "demon"];
+
+const OFFICIAL_CHARACTERS = (officialRoles as OfficialRole[])
+  .filter((role): role is OfficialRole & { team: CharacterType } =>
+    CHARACTER_TYPES.includes(role.team as CharacterType)
+  )
+  .map((role) => {
+    const alignment = role.team === "minion" || role.team === "demon" ? "e" : "g";
+    return {
+      sourceId: role.id,
+      name: role.name,
+      characterType: role.team,
+      edition: role.edition,
+      imageUrl: `https://release.botc.app/resources/characters/${role.edition}/${role.id}_${alignment}.webp`,
+    };
+  });
 
 const PLAYER_SEED = [
   "Abhi",
@@ -38,6 +64,38 @@ const SEED_GAMES = [
   ["2026-07-01", 6, "A Leech of Distrust v2.1", "good", ["Ryan told Abhi he was the Marionette, but Michael convinced Abhi he was being played. The leech host was executed and evil fell."]],
 ] as const;
 
+const genericCharacterImage = (characterType: CharacterType) => {
+  const alignment = characterType === "minion" || characterType === "demon" ? "e" : "g";
+  return `https://release.botc.app/resources/characters/generic/${characterType}_${alignment}.webp`;
+};
+
+async function seedOfficialCharacters() {
+  const officialCount = await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM characters WHERE is_custom = 0"
+  ).first<{ count: number }>();
+  if (Number(officialCount?.count ?? 0) >= OFFICIAL_CHARACTERS.length) return;
+
+  for (let index = 0; index < OFFICIAL_CHARACTERS.length; index += 50) {
+    const chunk = OFFICIAL_CHARACTERS.slice(index, index + 50);
+    await env.DB.batch(
+      chunk.map((role) =>
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO characters
+            (source_id, name, character_type, edition, image_url, is_custom, created_at)
+           VALUES (?, ?, ?, ?, ?, 0, ?)`
+        ).bind(
+          role.sourceId,
+          role.name,
+          role.characterType,
+          role.edition,
+          role.imageUrl,
+          new Date().toISOString()
+        )
+      )
+    );
+  }
+}
+
 async function ensureDatabase() {
   const db = env.DB;
   await db.batch([
@@ -59,6 +117,7 @@ async function ensureDatabase() {
       game_number INTEGER NOT NULL DEFAULT 1,
       script TEXT NOT NULL,
       winner TEXT NOT NULL CHECK (winner IN ('good','evil')),
+      winning_alignment TEXT CHECK (winning_alignment IN ('good','evil')),
       storyteller TEXT NOT NULL DEFAULT '',
       duration_minutes INTEGER,
       notes TEXT NOT NULL DEFAULT '[]',
@@ -70,8 +129,25 @@ async function ensureDatabase() {
       player TEXT NOT NULL,
       character TEXT NOT NULL,
       character_type TEXT NOT NULL DEFAULT 'townsfolk',
+      role_type TEXT,
       alignment TEXT NOT NULL CHECK (alignment IN ('good','evil')),
       FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS game_storytellers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id INTEGER NOT NULL,
+      storyteller TEXT NOT NULL,
+      FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS characters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT UNIQUE,
+      name TEXT NOT NULL,
+      character_type TEXT NOT NULL,
+      edition TEXT NOT NULL DEFAULT 'custom',
+      image_url TEXT NOT NULL,
+      is_custom INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
     )`),
   ]);
 
@@ -79,15 +155,24 @@ async function ensureDatabase() {
   if (!gameColumns.results.some((column) => column.name === "session_id")) {
     await db.prepare("ALTER TABLE games ADD COLUMN session_id INTEGER").run();
   }
+  if (!gameColumns.results.some((column) => column.name === "winning_alignment")) {
+    await db.prepare("ALTER TABLE games ADD COLUMN winning_alignment TEXT").run();
+  }
+
   const appearanceColumns = await db.prepare("PRAGMA table_info(appearances)").all<{ name: string }>();
   if (!appearanceColumns.results.some((column) => column.name === "character_type")) {
     await db.prepare("ALTER TABLE appearances ADD COLUMN character_type TEXT NOT NULL DEFAULT 'townsfolk'").run();
+  }
+  if (!appearanceColumns.results.some((column) => column.name === "role_type")) {
+    await db.prepare("ALTER TABLE appearances ADD COLUMN role_type TEXT").run();
   }
 
   await db.batch([
     db.prepare("CREATE INDEX IF NOT EXISTS games_played_at_idx ON games (played_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS games_session_id_idx ON games (session_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS appearances_game_id_idx ON appearances (game_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS game_storytellers_game_id_idx ON game_storytellers (game_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS characters_type_idx ON characters (character_type, name)"),
   ]);
 
   const count = await db.prepare("SELECT COUNT(*) AS count FROM games").first<{ count: number }>();
@@ -95,11 +180,22 @@ async function ensureDatabase() {
     await db.batch(
       SEED_GAMES.map(([date, game, script, winner, notes]) =>
         db.prepare(
-          "INSERT INTO games (played_at, game_number, script, winner, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-        ).bind(date, game, script, winner, JSON.stringify(notes), new Date().toISOString())
+          `INSERT INTO games
+            (played_at, game_number, script, winner, winning_alignment, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(date, game, script, winner, winner, JSON.stringify(notes), new Date().toISOString())
       )
     );
   }
+
+  await db.prepare(
+    `INSERT INTO game_storytellers (game_id, storyteller)
+     SELECT id, storyteller FROM games
+     WHERE TRIM(storyteller) <> ''
+       AND NOT EXISTS (
+         SELECT 1 FROM game_storytellers WHERE game_storytellers.game_id = games.id
+       )`
+  ).run();
 
   const sessionCount = await db.prepare("SELECT COUNT(*) AS count FROM sessions").first<{ count: number }>();
   if (Number(sessionCount?.count ?? 0) === 0) {
@@ -119,31 +215,68 @@ async function ensureDatabase() {
       )
     );
   }
+
+  await seedOfficialCharacters();
 }
 
 export async function GET() {
   try {
     await ensureDatabase();
-    const [gamesResult, appearancesResult, sessionsResult, playersResult] = await Promise.all([
-      env.DB.prepare(
-        "SELECT id, session_id AS sessionId, played_at AS playedAt, game_number AS gameNumber, script, winner, storyteller, duration_minutes AS durationMinutes, notes FROM games ORDER BY played_at DESC, game_number DESC, id DESC"
-      ).all(),
-      env.DB.prepare(
-        "SELECT id, game_id AS gameId, player, character, character_type AS characterType, alignment FROM appearances ORDER BY id"
-      ).all(),
-      env.DB.prepare(
-        "SELECT id, played_at AS playedAt, storyteller, created_at AS createdAt, (SELECT COUNT(*) FROM games WHERE games.session_id = sessions.id) AS gameCount FROM sessions ORDER BY played_at DESC, id DESC"
-      ).all(),
-      env.DB.prepare("SELECT id, name FROM players ORDER BY name COLLATE NOCASE").all(),
-    ]);
+    const [gamesResult, storytellersResult, appearancesResult, sessionsResult, playersResult, charactersResult] =
+      await Promise.all([
+        env.DB.prepare(
+          `SELECT id, session_id AS sessionId, played_at AS playedAt, game_number AS gameNumber,
+             script, winning_alignment AS winner, duration_minutes AS durationMinutes, notes
+           FROM games
+           ORDER BY played_at DESC, game_number DESC, id DESC`
+        ).all(),
+        env.DB.prepare(
+          "SELECT game_id AS gameId, storyteller FROM game_storytellers ORDER BY id"
+        ).all<{ gameId: number; storyteller: string }>(),
+        env.DB.prepare(
+          `SELECT id, game_id AS gameId, player, character, role_type AS characterType,
+             CASE
+               WHEN role_type IN ('minion', 'demon') THEN 'evil'
+               WHEN role_type IN ('townsfolk', 'outsider') THEN 'good'
+               ELSE NULL
+             END AS alignment
+           FROM appearances
+           ORDER BY id`
+        ).all(),
+        env.DB.prepare(
+          `SELECT id, played_at AS playedAt, created_at AS createdAt,
+             (SELECT COUNT(*) FROM games WHERE games.session_id = sessions.id) AS gameCount
+           FROM sessions
+           ORDER BY played_at DESC, id DESC`
+        ).all(),
+        env.DB.prepare("SELECT id, name FROM players ORDER BY name COLLATE NOCASE").all(),
+        env.DB.prepare(
+          `SELECT id, name, character_type AS characterType, edition, image_url AS imageUrl,
+             is_custom AS isCustom
+           FROM characters
+           ORDER BY character_type, name COLLATE NOCASE`
+        ).all(),
+      ]);
+
+    const storytellersByGame = new Map<number, string[]>();
+    storytellersResult.results.forEach((row) => {
+      storytellersByGame.set(row.gameId, [...(storytellersByGame.get(row.gameId) ?? []), row.storyteller]);
+    });
+
     return Response.json({
-      games: gamesResult.results.map((game) => ({
-        ...game,
-        notes: JSON.parse(String(game.notes || "[]")),
-      })),
+      games: gamesResult.results.map((game) => {
+        const storytellers = storytellersByGame.get(Number(game.id)) ?? [];
+        return {
+          ...game,
+          storytellers,
+          storyteller: storytellers.join(", "),
+          notes: JSON.parse(String(game.notes || "[]")),
+        };
+      }),
       appearances: appearancesResult.results,
       sessions: sessionsResult.results,
       players: playersResult.results,
+      characters: charactersResult.results,
     });
   } catch (error) {
     return Response.json(
@@ -157,13 +290,15 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     const body = (await request.json()) as {
-      action?: "createSession" | "createPlayer" | "addGame";
+      action?: "createSession" | "createPlayer" | "createCharacter" | "addGame";
       sessionId?: number;
       playedAt?: string;
-      storyteller?: string;
       playerName?: string;
+      characterName?: string;
+      characterType?: CharacterType;
       script?: string;
-      winner?: "good" | "evil";
+      winner?: Winner | null;
+      storytellers?: string[];
       durationMinutes?: number | null;
       notes?: string[];
       appearances?: NewAppearance[];
@@ -174,59 +309,135 @@ export async function POST(request: Request) {
         return Response.json({ error: "Choose a date for the session." }, { status: 400 });
       }
       const session = await env.DB.prepare(
-        "INSERT INTO sessions (played_at, storyteller, created_at) VALUES (?, ?, ?) RETURNING id, played_at AS playedAt, storyteller"
-      ).bind(body.playedAt, body.storyteller?.trim() ?? "", new Date().toISOString()).first();
+        `INSERT INTO sessions (played_at, storyteller, created_at)
+         VALUES (?, '', ?)
+         RETURNING id, played_at AS playedAt`
+      ).bind(body.playedAt, new Date().toISOString()).first();
       return Response.json({ session }, { status: 201 });
     }
 
     if (body.action === "createPlayer") {
       const name = body.playerName?.trim();
       if (!name) return Response.json({ error: "Enter a player name." }, { status: 400 });
-      await env.DB.prepare("INSERT OR IGNORE INTO players (name, created_at) VALUES (?, ?)").bind(name, new Date().toISOString()).run();
-      const player = await env.DB.prepare("SELECT id, name FROM players WHERE name = ? COLLATE NOCASE").bind(name).first();
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO players (name, created_at) VALUES (?, ?)"
+      ).bind(name, new Date().toISOString()).run();
+      const player = await env.DB.prepare(
+        "SELECT id, name FROM players WHERE name = ? COLLATE NOCASE"
+      ).bind(name).first();
       return Response.json({ player }, { status: 201 });
     }
 
-    if (!body.sessionId || !body.script?.trim() || !["good", "evil"].includes(body.winner ?? "")) {
-      return Response.json({ error: "Session, script, and winner are required." }, { status: 400 });
+    if (body.action === "createCharacter") {
+      const name = body.characterName?.trim();
+      if (!name || !body.characterType || !CHARACTER_TYPES.includes(body.characterType)) {
+        return Response.json({ error: "Enter a name and category for the custom character." }, { status: 400 });
+      }
+      const existing = await env.DB.prepare(
+        "SELECT id, name, character_type AS characterType, edition, image_url AS imageUrl, is_custom AS isCustom FROM characters WHERE name = ? COLLATE NOCASE AND character_type = ?"
+      ).bind(name, body.characterType).first();
+      if (existing) return Response.json({ character: existing }, { status: 200 });
+
+      const character = await env.DB.prepare(
+        `INSERT INTO characters
+          (source_id, name, character_type, edition, image_url, is_custom, created_at)
+         VALUES (NULL, ?, ?, 'custom', ?, 1, ?)
+         RETURNING id, name, character_type AS characterType, edition, image_url AS imageUrl, is_custom AS isCustom`
+      ).bind(
+        name,
+        body.characterType,
+        genericCharacterImage(body.characterType),
+        new Date().toISOString()
+      ).first();
+      return Response.json({ character }, { status: 201 });
+    }
+
+    if (!body.sessionId) {
+      return Response.json({ error: "Choose or start a session first." }, { status: 400 });
     }
     const session = await env.DB.prepare(
-      "SELECT id, played_at AS playedAt, storyteller FROM sessions WHERE id = ?"
-    ).bind(body.sessionId).first<{ id: number; playedAt: string; storyteller: string }>();
+      "SELECT id, played_at AS playedAt FROM sessions WHERE id = ?"
+    ).bind(body.sessionId).first<{ id: number; playedAt: string }>();
     if (!session) return Response.json({ error: "That session no longer exists." }, { status: 404 });
 
     const next = await env.DB.prepare(
       "SELECT COALESCE(MAX(game_number), 0) + 1 AS gameNumber FROM games WHERE session_id = ?"
     ).bind(session.id).first<{ gameNumber: number }>();
 
+    const storytellers = Array.from(
+      new Set((body.storytellers ?? []).map((name) => name.trim()).filter(Boolean))
+    );
+    const winner = body.winner && ["good", "evil"].includes(body.winner) ? body.winner : null;
     const created = await env.DB.prepare(
-      "INSERT INTO games (session_id, played_at, game_number, script, winner, storyteller, duration_minutes, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"
+      `INSERT INTO games
+        (session_id, played_at, game_number, script, winner, winning_alignment, storyteller, duration_minutes, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING id`
     )
       .bind(
         session.id,
         session.playedAt,
         Number(next?.gameNumber ?? 1),
-        body.script.trim(),
-        body.winner,
-        session.storyteller,
+        body.script?.trim() ?? "",
+        winner ?? "good",
+        winner,
+        storytellers.join(", "),
         body.durationMinutes || null,
         JSON.stringify((body.notes ?? []).filter(Boolean)),
         new Date().toISOString()
       )
       .first<{ id: number }>();
 
-    const rows = (body.appearances ?? []).filter(
-      (row) => row.player?.trim() && row.character?.trim() &&
-        ["townsfolk", "outsider", "minion", "demon"].includes(row.characterType ?? "")
-    );
+    const rows = (body.appearances ?? [])
+      .map((row) => ({
+        player: row.player?.trim() ?? "",
+        character: row.character?.trim() ?? "",
+        characterType: CHARACTER_TYPES.includes(row.characterType as CharacterType)
+          ? row.characterType as CharacterType
+          : null,
+      }))
+      .filter((row) => row.player || row.character);
+
+    if (created?.id && storytellers.length) {
+      await env.DB.batch(
+        storytellers.map((storyteller) =>
+          env.DB.prepare(
+            "INSERT INTO game_storytellers (game_id, storyteller) VALUES (?, ?)"
+          ).bind(created.id, storyteller)
+        )
+      );
+    }
+
+    for (const row of rows) {
+      if (row.character && row.characterType) {
+        const existing = await env.DB.prepare(
+          "SELECT id FROM characters WHERE name = ? COLLATE NOCASE AND character_type = ?"
+        ).bind(row.character, row.characterType).first();
+        if (!existing) {
+          await env.DB.prepare(
+            `INSERT INTO characters
+              (source_id, name, character_type, edition, image_url, is_custom, created_at)
+             VALUES (NULL, ?, ?, 'custom', ?, 1, ?)`
+          ).bind(
+            row.character,
+            row.characterType,
+            genericCharacterImage(row.characterType),
+            new Date().toISOString()
+          ).run();
+        }
+      }
+    }
+
     if (created?.id && rows.length) {
       await env.DB.batch(
         rows.map((row) => {
-          const characterType = row.characterType!;
-          const alignment = characterType === "minion" || characterType === "demon" ? "evil" : "good";
+          const legacyType = row.characterType ?? "townsfolk";
+          const alignment = legacyType === "minion" || legacyType === "demon" ? "evil" : "good";
           return env.DB.prepare(
-            "INSERT INTO appearances (game_id, player, character, character_type, alignment) VALUES (?, ?, ?, ?, ?)"
-          ).bind(created.id, row.player!.trim(), row.character!.trim(), characterType, alignment);
+            `INSERT INTO appearances
+              (game_id, player, character, character_type, role_type, alignment)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(created.id, row.player, row.character, legacyType, row.characterType, alignment);
         })
       );
     }
