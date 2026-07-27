@@ -1374,17 +1374,19 @@ export default function ChronicleDashboard({
                   placeholder="Search the archive…"
                 />
               </label>
-              <label>
-                Script
-                <select value={scriptFilter} onChange={(event) => setScriptFilter(event.target.value)}>
-                  <option>All scripts</option>
-                  {stats.scripts.map((script) => <option key={script}>{script}</option>)}
-                </select>
-              </label>
-              <span className="filter-count">
-                <strong>{filteredGames.length}</strong>
-                result{filteredGames.length === 1 ? "" : "s"}
-              </span>
+              <div className="script-filter-group">
+                <label>
+                  Script
+                  <select value={scriptFilter} onChange={(event) => setScriptFilter(event.target.value)}>
+                    <option>All scripts</option>
+                    {stats.scripts.map((script) => <option key={script}>{script}</option>)}
+                  </select>
+                </label>
+                <span className="filter-count">
+                  <strong>{filteredGames.length}</strong>
+                  result{filteredGames.length === 1 ? "" : "s"}
+                </span>
+              </div>
             </div>
             <div className="game-ledger">
               {filteredGames.map((game) => {
@@ -1423,7 +1425,10 @@ export default function ChronicleDashboard({
                           {game.storytellers.length > 0 ? ` · Told by ${game.storytellers.join(" & ")}` : ""}
                         </span>
                         <strong>
-                          <span>{isExpanded ? "Hide lineup" : "View lineup"}</span>
+                          <span>
+                            <span className="disclosure-verb">{isExpanded ? "Hide " : "View "}</span>
+                            lineup
+                          </span>
                           <DisclosureChevron expanded={isExpanded} />
                         </strong>
                       </span>
@@ -1450,16 +1455,16 @@ export default function ChronicleDashboard({
                         <div className="game-lineup-section">
                           <div className="game-detail-heading">
                             <span>Who was what</span>
-                            <small>{lineup.length ? `${lineup.length} recorded` : "No lineup yet"}</small>
+                            <small>{lineup.length ? "Full lineup" : "No lineup yet"}</small>
                           </div>
                           {lineup.length ? (
                             <div className="game-lineup">
-                              {lineup.map((appearance) => {
+                              {lineup.map((appearance, seatIndex) => {
                                 const character = characterByName.get(appearance.character.toLowerCase());
                                 return (
                                   <div
                                     className={`game-seat ${appearance.characterType ?? "unknown"}`}
-                                    key={appearance.id}
+                                    key={`${game.id}-${appearance.id}-${seatIndex}`}
                                   >
                                     <span className="game-seat-icon">
                                       {character?.imageUrl
