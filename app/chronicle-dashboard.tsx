@@ -134,6 +134,17 @@ const playerInitials = (name: string) =>
     .join("")
     .toUpperCase();
 
+function DisclosureChevron({ expanded }: { expanded: boolean }) {
+  return (
+    <span
+      className={`disclosure-chevron${expanded ? " expanded" : ""}`}
+      aria-hidden="true"
+    >
+      <span>⌄</span>
+    </span>
+  );
+}
+
 export default function ChronicleDashboard({
   initialView = "overview",
 }: {
@@ -1161,7 +1172,7 @@ export default function ChronicleDashboard({
                             <strong>{rate === null ? "—" : `${rate}%`}</strong>
                             <i><span style={{ width: `${rate ?? 0}%` }} /></i>
                           </span>
-                          <span className="player-chevron" aria-hidden="true">⌄</span>
+                          <DisclosureChevron expanded={isExpanded} />
                         </button>
 
                         {isExpanded && (
@@ -1359,6 +1370,7 @@ export default function ChronicleDashboard({
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
+                  aria-label="Search the game archive"
                   placeholder="Search the archive…"
                 />
               </label>
@@ -1410,7 +1422,10 @@ export default function ChronicleDashboard({
                             : "Lineup not recorded"}
                           {game.storytellers.length > 0 ? ` · Told by ${game.storytellers.join(" & ")}` : ""}
                         </span>
-                        <strong>{isExpanded ? "Hide lineup" : "View lineup"} <i aria-hidden="true">⌄</i></strong>
+                        <strong>
+                          <span>{isExpanded ? "Hide lineup" : "View lineup"}</span>
+                          <DisclosureChevron expanded={isExpanded} />
+                        </strong>
                       </span>
                     </button>
 
