@@ -140,7 +140,7 @@ function DisclosureChevron({ expanded }: { expanded: boolean }) {
       className={`disclosure-chevron${expanded ? " expanded" : ""}`}
       aria-hidden="true"
     >
-      <span>⌄</span>
+      <span />
     </span>
   );
 }
