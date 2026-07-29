@@ -125,7 +125,8 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.doesNotMatch(css, /\.page-ready/);
   assert.match(dashboard, /expandedGames/);
   assert.match(dashboard, /Who was what/);
-  assert.match(dashboard, /View lineup/);
+  assert.match(dashboard, /className="disclosure-verb"/);
+  assert.match(dashboard, /\{isExpanded \? "Hide " : "View "\}/);
   assert.match(dashboard, /Edit game/);
   assert.match(dashboard, /editingAppearances/);
   assert.match(dashboard, /appearancesByGame/);
@@ -155,8 +156,8 @@ test("supports roster corrections and script-scoped character choices", async ()
   assert.match(modal, /SCRIPT_EDITIONS/);
   assert.match(modal, /character\.edition !== selectedEdition/);
   assert.match(modal, /roles only/);
-  assert.match(css, /\.filters \{[^}]*align-items:\s*flex-end/s);
-  assert.match(css, /\.filter-count \{[^}]*align-self:\s*end/s);
+  assert.match(css, /\.filters \{[^}]*align-items:\s*center/s);
+  assert.match(css, /\.filter-count \{[^}]*height:\s*44px/s);
 });
 
 test("keeps cached documents compatible across releases", async () => {
