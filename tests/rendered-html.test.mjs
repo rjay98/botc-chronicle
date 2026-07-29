@@ -156,7 +156,10 @@ test("supports roster corrections and script-scoped character choices", async ()
   assert.match(modal, /SCRIPT_EDITIONS/);
   assert.match(modal, /character\.edition !== selectedEdition/);
   assert.match(modal, /roles only/);
+  assert.match(dashboard, /className="script-filter-label"/);
+  assert.match(dashboard, /<span>Script<\/span>/);
   assert.match(css, /\.filters \{[^}]*align-items:\s*center/s);
+  assert.match(css, /\.script-filter-label > select \{[^}]*position:\s*absolute;[^}]*inset:\s*0;/s);
   assert.match(css, /\.filter-count \{[^}]*height:\s*44px/s);
 });
 

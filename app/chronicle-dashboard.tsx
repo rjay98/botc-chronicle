@@ -1375,8 +1375,8 @@ export default function ChronicleDashboard({
                 />
               </label>
               <div className="script-filter-group">
-                <label>
-                  Script
+                <label className="script-filter-label">
+                  <span>Script</span>
                   <select value={scriptFilter} onChange={(event) => setScriptFilter(event.target.value)}>
                     <option>All scripts</option>
                     {stats.scripts.map((script) => <option key={script}>{script}</option>)}
