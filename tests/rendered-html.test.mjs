@@ -139,6 +139,26 @@ test("contains the mobile interaction and rendering safeguards", async () => {
   assert.match(api, /DELETE FROM appearances WHERE game_id/);
 });
 
+test("supports roster corrections and script-scoped character choices", async () => {
+  const [dashboard, modal, api, css] = await Promise.all([
+    read("app/chronicle-dashboard.tsx"),
+    read("app/session-modal.tsx"),
+    read("app/api/games/route.ts"),
+    read("app/globals.css"),
+  ]);
+
+  assert.match(dashboard, /Edit player name/);
+  assert.match(dashboard, /action:\s*"renamePlayer"/);
+  assert.match(api, /body\.action === "renamePlayer"/);
+  assert.match(api, /UPDATE appearances SET player/);
+  assert.match(api, /UPDATE game_storytellers SET storyteller/);
+  assert.match(modal, /SCRIPT_EDITIONS/);
+  assert.match(modal, /character\.edition !== selectedEdition/);
+  assert.match(modal, /roles only/);
+  assert.match(css, /\.filters \{[^}]*align-items:\s*flex-end/s);
+  assert.match(css, /\.filter-count \{[^}]*align-self:\s*end/s);
+});
+
 test("keeps cached documents compatible across releases", async () => {
   const [worker, packageJson, preserveScript] = await Promise.all([
     read("worker/index.ts"),

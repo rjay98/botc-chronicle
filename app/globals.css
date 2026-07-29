@@ -565,6 +565,52 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
   border-top: 1px solid rgba(52,42,50,.72);
   background: rgba(7,6,9,.52);
 }
+.player-name-editor {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -8px;
+}
+.player-name-editor > button,
+.player-name-editor form button {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid #4a3c47;
+  border-radius: 999px;
+  background: rgba(255,255,255,.025);
+  color: #c8beb5;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.player-name-editor form {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+.player-name-editor label { display: grid; gap: 5px; }
+.player-name-editor label > span {
+  color: #9f958d;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.player-name-editor input {
+  width: min(260px, 42vw);
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #100e12;
+  padding: 0 11px;
+  color: var(--ink);
+  outline: none;
+}
+.player-name-editor input:focus { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-soft); }
+.player-name-editor form .save-player-name { border-color: rgba(136,116,179,.7); background: var(--focus-soft); color: #eee8f6; }
+.player-name-editor button:disabled { opacity: .55; cursor: wait; }
 .player-detail-top {
   grid-column: 1 / -1;
   display: grid;
@@ -682,14 +728,14 @@ h1, h2, blockquote { font-family: Georgia, "Times New Roman", serif; }
 .empty-state > p:not(.eyebrow) { max-width: 600px; color: var(--muted); line-height: 1.7; }
 .empty-state .primary-action { justify-self: center; margin-top: 10px; }
 
-.filters { display: grid; grid-template-columns: minmax(280px, 1fr) 240px auto; align-items: end; gap: 12px; padding: 16px; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(27,23,29,.96), rgba(17,15,19,.98)); margin-bottom: 20px; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.13); }
-.filters label { color: #aaa198; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.filters { display: grid; grid-template-columns: minmax(280px, 1fr) 240px auto; align-items: flex-end; gap: 12px; padding: 16px; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(27,23,29,.96), rgba(17,15,19,.98)); margin-bottom: 20px; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.13); }
+.filters label { min-width: 0; color: #aaa198; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .filters input, .filters select { display: block; width: 100%; margin-top: 6px; height: 44px; border: 1px solid var(--line); border-radius: 8px; background: #100e12; padding: 0 12px; color: var(--ink); outline: none; font-weight: 500; letter-spacing: 0; text-transform: none; }
 .filters input:focus, .filters select:focus { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-soft); }
 .search-field { min-width: 0; position: relative; }
 .search-field input { padding-left: 36px; }
 .search-field span { position: absolute; left: 13px; bottom: 11px; font-size: 18px; color: var(--muted); }
-.filter-count { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.025); color: var(--muted); font-size: 9px; text-transform: uppercase; white-space: nowrap; }
+.filter-count { height: 44px; min-height: 44px; align-self: end; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--muted); font-size: 9px; text-transform: uppercase; white-space: nowrap; }
 .filter-count strong { color: var(--ink); font: 17px/1 Georgia, serif; }
 .game-ledger { display: grid; gap: 14px; }
 .game-entry { display: grid; grid-template-columns: 96px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, rgba(25,21,27,.9), rgba(13,12,15,.95)); box-shadow: 0 16px 42px rgba(0,0,0,.12); transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
@@ -1025,6 +1071,7 @@ select optgroup {
 
 @media (max-width: 800px) and (min-width: 701px) {
   .data-view, .games-view, .player-analytics, .player-controls, .player-board, .character-toolbar, .filters { width: 100%; min-width: 0; max-width: 100%; }
+  .filters { grid-template-columns: minmax(0, 1fr) minmax(180px, .7fr) auto; }
   .player-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .player-search, .player-filter { grid-column: 1 / -1; }
   .player-filter { min-width: 0; }
@@ -1034,6 +1081,7 @@ select optgroup {
   .player-chevron { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: rgba(255,255,255,.045); }
   .player-detail, .player-detail-top { grid-template-columns: minmax(0, 1fr); }
   .player-detail { padding: 20px 24px; }
+  .player-name-editor { margin-bottom: 0; }
   .player-identity small, .player-form-card small, .player-recent small { font-size: 11px; line-height: 1.45; }
   .game-detail, .game-lineup { grid-template-columns: minmax(0, 1fr); }
   .modal { width: min(720px, calc(100% - 24px)); }
@@ -1157,6 +1205,12 @@ select optgroup {
   .player-rate > i { display: block; width: 48px; margin: 6px 0 0 auto; }
   .player-chevron { width: 32px; height: 44px; display: grid; place-items: center; margin-left: 0; border-radius: 999px; background: rgba(255,255,255,.045); color: #c8beb4; }
   .player-detail { grid-template-columns: 1fr; gap: 16px; padding: 18px 20px 20px; }
+  .player-name-editor { justify-content: stretch; margin-bottom: 0; }
+  .player-name-editor > button { width: 100%; min-height: 44px; }
+  .player-name-editor form { width: 100%; display: grid; grid-template-columns: 1fr 1fr; align-items: end; }
+  .player-name-editor form label { grid-column: 1 / -1; }
+  .player-name-editor input { width: 100%; height: 44px; font-size: 16px; }
+  .player-name-editor form button { min-height: 44px; }
   .player-detail-top { grid-template-columns: minmax(0, 1fr); gap: 15px; padding-bottom: 15px; }
   .detail-label { color: #b9afa6; font-size: 10px; }
   .player-form-card strong { font-size: 17px; }

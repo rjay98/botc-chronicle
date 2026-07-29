@@ -376,9 +376,10 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     const body = (await request.json()) as {
-        action?: "createSession" | "createPlayer" | "createCharacter" | "setPersonalResult" | "addGame" | "updateGame";
+        action?: "createSession" | "createPlayer" | "renamePlayer" | "createCharacter" | "setPersonalResult" | "addGame" | "updateGame";
         sessionId?: number;
         gameId?: number;
+      playerId?: number;
       playedAt?: string;
       playerName?: string;
       characterName?: string;
@@ -403,6 +404,61 @@ export async function POST(request: Request) {
          WHERE game_id = ? AND player = ? COLLATE NOCASE`
       ).bind(personalWin, body.gameId, playerName).run();
       return Response.json({ ok: true, changes: updated.meta.changes });
+    }
+
+    if (body.action === "renamePlayer") {
+      const playerId = Number(body.playerId);
+      const name = body.playerName?.trim().replace(/\s+/g, " ");
+      if (!Number.isInteger(playerId) || playerId < 1 || !name) {
+        return Response.json({ error: "Choose a player and enter a name." }, { status: 400 });
+      }
+
+      const player = await env.DB.prepare(
+        "SELECT id, name FROM players WHERE id = ?"
+      ).bind(playerId).first<{ id: number; name: string }>();
+      if (!player) {
+        return Response.json({ error: "That player no longer exists." }, { status: 404 });
+      }
+
+      const duplicate = await env.DB.prepare(
+        "SELECT id FROM players WHERE name = ? COLLATE NOCASE AND id <> ?"
+      ).bind(name, playerId).first<{ id: number }>();
+      if (duplicate) {
+        return Response.json(
+          { error: "A player with that name already exists." },
+          { status: 409 }
+        );
+      }
+
+      await env.DB.batch([
+        env.DB.prepare("UPDATE players SET name = ? WHERE id = ?").bind(name, playerId),
+        env.DB.prepare(
+          "UPDATE appearances SET player = ? WHERE player = ? COLLATE NOCASE"
+        ).bind(name, player.name),
+        env.DB.prepare(
+          "UPDATE game_storytellers SET storyteller = ? WHERE storyteller = ? COLLATE NOCASE"
+        ).bind(name, player.name),
+        env.DB.prepare(
+          "UPDATE sessions SET storyteller = ? WHERE storyteller = ? COLLATE NOCASE"
+        ).bind(name, player.name),
+        env.DB.prepare(
+          "UPDATE games SET storyteller = ? WHERE storyteller = ? COLLATE NOCASE"
+        ).bind(name, player.name),
+        env.DB.prepare(
+          `UPDATE games
+           SET storyteller = (
+             SELECT GROUP_CONCAT(storyteller, ', ')
+             FROM game_storytellers
+             WHERE game_storytellers.game_id = games.id
+           )
+           WHERE EXISTS (
+             SELECT 1 FROM game_storytellers
+             WHERE game_storytellers.game_id = games.id
+           )`
+        ),
+      ]);
+
+      return Response.json({ player: { id: playerId, name } });
     }
 
     if (body.action === "createSession") {

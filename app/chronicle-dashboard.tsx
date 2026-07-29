@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import SessionModal, {
   CharacterRecord,
   CharacterType,
@@ -158,6 +158,9 @@ export default function ChronicleDashboard({
   const [playerFilter, setPlayerFilter] = useState<PlayerFilter>("all");
   const [playerScope, setPlayerScope] = useState<PlayerScope>("all");
   const [expandedPlayer, setExpandedPlayer] = useState<string | null>(null);
+  const [editingPlayerId, setEditingPlayerId] = useState<number | null>(null);
+  const [playerNameDraft, setPlayerNameDraft] = useState("");
+  const [savingPlayerName, setSavingPlayerName] = useState(false);
   const [expandedGames, setExpandedGames] = useState<Set<number>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [entered, setEntered] = useState(false);
@@ -209,6 +212,45 @@ export default function ChronicleDashboard({
 
     setMessage("Showing the imported ledger while the shared archive connects.");
     setLoading(false);
+  };
+
+  const renamePlayer = async (
+    event: FormEvent<HTMLFormElement>,
+    player: PlayerRecord
+  ) => {
+    event.preventDefault();
+    const nextName = playerNameDraft.trim().replace(/\s+/g, " ");
+    if (!nextName || nextName === player.name) {
+      setEditingPlayerId(null);
+      setPlayerNameDraft("");
+      return;
+    }
+
+    setSavingPlayerName(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "renamePlayer",
+          playerId: player.id,
+          playerName: nextName,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not rename player.");
+
+      setExpandedPlayer(nextName);
+      setEditingPlayerId(null);
+      setPlayerNameDraft("");
+      await loadGames();
+      setMessage(`${player.name} is now ${nextName}. Past lineups and storyteller credits were updated.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not rename player.");
+    } finally {
+      setSavingPlayerName(false);
+    }
   };
 
   useEffect(() => {
@@ -1074,6 +1116,9 @@ export default function ChronicleDashboard({
                     const isExpanded = expandedPlayer === player.name;
                     const rate = player.decided ? Math.round((player.wins / player.decided) * 100) : null;
                     const playerView = playerAnalytics.byName.get(player.name);
+                    const playerRecord = players.find(
+                      (entry) => entry.name.toLowerCase() === player.name.toLowerCase()
+                    );
                     return (
                       <article className={`player-row${isExpanded ? " expanded" : ""}`} key={player.name}>
                         <button
@@ -1121,6 +1166,50 @@ export default function ChronicleDashboard({
 
                         {isExpanded && (
                           <div className="player-detail">
+                            {playerRecord && (
+                              <div className="player-name-editor">
+                                {editingPlayerId === playerRecord.id ? (
+                                  <form onSubmit={(event) => renamePlayer(event, playerRecord)}>
+                                    <label>
+                                      <span>Player name</span>
+                                      <input
+                                        value={playerNameDraft}
+                                        onChange={(event) => setPlayerNameDraft(event.target.value)}
+                                        autoFocus
+                                        aria-label={`Edit ${player.name}'s name`}
+                                      />
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingPlayerId(null);
+                                        setPlayerNameDraft("");
+                                      }}
+                                      disabled={savingPlayerName}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="submit"
+                                      className="save-player-name"
+                                      disabled={savingPlayerName || !playerNameDraft.trim()}
+                                    >
+                                      {savingPlayerName ? "Saving…" : "Save name"}
+                                    </button>
+                                  </form>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingPlayerId(playerRecord.id);
+                                      setPlayerNameDraft(playerRecord.name);
+                                    }}
+                                  >
+                                    Edit player name
+                                  </button>
+                                )}
+                              </div>
+                            )}
                             <div className="player-detail-top">
                               <section className="player-form-card">
                                 <span className="detail-label">{playerView?.form.label ?? "Recent form"}</span>

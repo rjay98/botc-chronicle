@@ -82,6 +82,17 @@ const emptyLineupRow = (): LineupRow => ({
 });
 
 const CHARACTER_TYPES: CharacterType[] = ["townsfolk", "outsider", "minion", "demon"];
+const SCRIPT_EDITIONS: Record<string, string> = {
+  "trouble brewing": "tb",
+  "troubled brewing": "tb",
+  "sects & violets": "snv",
+  "sects and violets": "snv",
+  "bad moon rising": "bmr",
+  "blood moon rising": "bmr",
+};
+
+const scriptEdition = (script: string) =>
+  SCRIPT_EDITIONS[script.trim().replace(/\s+/g, " ").toLowerCase()] ?? null;
 
 const formatDate = (date: string) =>
   new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
@@ -164,16 +175,41 @@ export default function SessionModal({
     };
   }, []);
 
+  const selectedScriptName = scriptChoice === "__custom__" ? newScript.trim() : scriptChoice;
+  const selectedEdition = scriptEdition(selectedScriptName);
+
   const charactersByType = useMemo(() => {
     const grouped = new Map<CharacterType, CharacterRecord[]>();
     (["townsfolk", "outsider", "minion", "demon"] as CharacterType[]).forEach((type) =>
       grouped.set(type, [])
     );
     characters.forEach((character) => {
+      if (selectedEdition && character.edition !== selectedEdition) return;
       grouped.get(character.characterType)?.push(character);
     });
     return grouped;
-  }, [characters]);
+  }, [characters, selectedEdition]);
+
+  const changeScript = (nextScript: string) => {
+    setScriptChoice(nextScript);
+    if (nextScript !== "__custom__") setNewScript("");
+
+    const nextEdition = scriptEdition(nextScript);
+    if (!nextEdition) return;
+    setLineup((current) =>
+      current.map((row) => {
+        if (!row.character || row.customCharacter) return row;
+        const character = characters.find(
+          (entry) =>
+            entry.characterType === row.characterType
+            && entry.name.toLowerCase() === row.character.toLowerCase()
+        );
+        return character && character.edition !== nextEdition
+          ? { ...row, character: "", customCharacter: false }
+          : row;
+      })
+    );
+  };
 
   const storytellerOptions = useMemo(() => {
     const counts = new Map(localPlayers.map((player) => [player.name.toLowerCase(), 0]));
@@ -416,10 +452,7 @@ export default function SessionModal({
                   <select
                     aria-label="Script optional"
                     value={scriptChoice}
-                    onChange={(event) => {
-                      setScriptChoice(event.target.value);
-                      if (event.target.value !== "__custom__") setNewScript("");
-                    }}
+                    onChange={(event) => changeScript(event.target.value)}
                   >
                     <option value="">Not recorded</option>
                     {scripts.map((script) => <option key={script} value={script}>{script}</option>)}
@@ -508,18 +541,35 @@ export default function SessionModal({
 
               <div className="lineup-section">
                 <div className="section-label">
-                  <span>Player lineup · everything optional</span><i />
+                  <span>
+                    Player lineup · everything optional
+                    {selectedEdition ? ` · ${selectedScriptName} roles only` : ""}
+                  </span><i />
                 </div>
                 <div className="lineup-head">
                   <span>Player</span><span>Category</span><span>Character</span><span>Personal result</span><span />
                 </div>
                 <div className="lineup-rows">
                   {lineup.map((row, index) => {
-                    const availableCharacters = row.characterType
+                    const scriptCharacters = row.characterType
                       ? charactersByType.get(row.characterType) ?? []
                       : [];
+                    const existingCharacter = row.characterType && row.character
+                      ? characters.find(
+                          (character) =>
+                            character.characterType === row.characterType
+                            && character.name.toLowerCase() === row.character.toLowerCase()
+                        )
+                      : null;
+                    const availableCharacters =
+                      existingCharacter
+                      && !scriptCharacters.some((character) => character.id === existingCharacter.id)
+                        ? [...scriptCharacters, existingCharacter].sort((a, b) =>
+                            a.name.localeCompare(b.name)
+                          )
+                        : scriptCharacters;
                     const selectedCharacter = availableCharacters.find(
-                      (character) => character.name === row.character
+                      (character) => character.name.toLowerCase() === row.character.toLowerCase()
                     );
                     return (
                       <div className="lineup-row" key={row.id}>
