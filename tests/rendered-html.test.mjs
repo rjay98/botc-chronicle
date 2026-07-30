@@ -159,7 +159,8 @@ test("supports roster corrections and script-scoped character choices", async ()
   assert.match(dashboard, /className="script-filter-label"/);
   assert.match(dashboard, /<span>Script<\/span>/);
   assert.match(css, /\.filters \{[^}]*align-items:\s*center/s);
-  assert.match(css, /\.script-filter-label > select \{[^}]*position:\s*absolute;[^}]*inset:\s*0;/s);
+  assert.match(css, /\.filters \.script-filter-label > select \{[^}]*position:\s*absolute;[^}]*inset:\s*0;/s);
+  assert.match(css, /\.filters \.script-filter-label > select \{[^}]*padding:\s*14px 34px 0 11px;/s);
   assert.match(css, /\.filter-count \{[^}]*height:\s*44px/s);
 });
 
